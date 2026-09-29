@@ -11,7 +11,7 @@
 
 | 应用 | 说明 |
 | --- | --- |
-| [`offline-habit-tracker`](apps/offline-habit-tracker/docs/habit-tracker.zh_CN.md) | 离线每日习惯热力图，支持掉电保存打卡、本地 Wi-Fi 照片管理和照片屏保 |
+| [`offline-habit-tracker`](apps/offline-habit-tracker/README.zh_CN.md) | 离线每日习惯热力图，支持掉电保存打卡、本地 Wi-Fi 照片管理和照片屏保 |
 
 请进入应用自己的目录执行构建和测试。例如：
 
