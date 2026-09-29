@@ -2,9 +2,9 @@
   <a href="README.zh_CN.md">简体中文</a> · <strong>English</strong>
 </p>
 
-# Offline Habit Tracker
+# Glow Journal
 
-An offline habit-check-in application for the FoloToy AI Passport. It replaces
+A calm, offline habit journal for the FoloToy AI Passport. It replaces
 the official hardware-test menu with a dedicated 240 × 320 interface featuring
 a GitHub-style daily contribution heatmap, persistent check-ins, phone-based
 photo management, and an automatic photo screensaver.

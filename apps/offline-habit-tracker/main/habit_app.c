@@ -208,7 +208,7 @@ static void build_heatmap(void)
     s_screen_kind = SCREEN_HEATMAP;
     s_last_activity = lv_tick_get();
     s_grid_start = habit_grid_start(s_page_anchor, GRID_WEEKS);
-    lv_obj_t *screen = base_screen("HABIT");
+    lv_obj_t *screen = base_screen("GLOW");
     s_selected_label = label(screen, "", 14, 43, &lv_font_montserrat_20, COLOR_TEXT);
     s_streak_label = label(screen, "", 14, 75, &lv_font_montserrat_14, COLOR_ACTIVE);
 

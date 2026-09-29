@@ -2,9 +2,9 @@
   <strong>简体中文</strong> · <a href="README.md">English</a>
 </p>
 
-# 离线习惯打卡
+# 微光日记
 
-这是一个面向 FoloToy AI Passport 的离线习惯打卡应用。它不再使用官方硬件
+这是一个面向 FoloToy AI Passport 的安静、离线习惯日记。它不再使用官方硬件
 测试菜单，而是提供专门设计的 240 × 320 界面，包括 GitHub 风格的每日热力图、
 掉电保存打卡、手机照片管理和自动照片屏保。
 

@@ -2,7 +2,7 @@
   <a href="habit-tracker.zh_CN.md">简体中文</a> · <strong>English</strong>
 </p>
 
-# Offline Habit Tracker
+# Glow Journal
 
 The habit tracker is a standalone 240 × 320 application. It replaces the
 hardware-test menu with a GitHub-style 13-week daily heatmap and stores both
