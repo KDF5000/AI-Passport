@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
@@ -68,54 +69,50 @@ final class AiGateway {
 
   Future<WebSocketChannel> _openAsrChannel() async {
     final connectId = _connectId();
-    Object? lastError;
-    for (final candidate in _asrCandidates()) {
-      WebSocketChannel? channel;
-      try {
-        channel = await websocket(
-          candidate.endpoint,
-          _sailHeaders(connectId, candidate.resourceId),
-        );
-        await channel.ready;
-        return channel;
-      } catch (error) {
-        lastError = error;
-        if (channel != null) {
-          try {
-            // A channel whose HTTP upgrade failed may never complete close().
-            // Do not let cleanup prevent the next authorized ASR resource from
-            // being attempted.
-            unawaited(channel.sink.close().catchError((_) {}));
-          } catch (_) {
-            // The failed HTTP upgrade may already have closed the socket.
-          }
+    final candidate = _asrCandidate();
+    WebSocketChannel? channel;
+    try {
+      debugPrint(
+        'ASR connect: endpoint=${candidate.endpoint} '
+        'resource=${candidate.resourceId}',
+      );
+      channel = await websocket(
+        candidate.endpoint,
+        _sailHeaders(connectId, candidate.resourceId),
+      );
+      await channel.ready;
+      debugPrint(
+        'ASR connected: host=${candidate.endpoint.host} '
+        'resource=${candidate.resourceId}',
+      );
+      return channel;
+    } catch (error) {
+      debugPrint(
+        'ASR handshake rejected: host=${candidate.endpoint.host} '
+        'resource=${candidate.resourceId} error=$error',
+      );
+      if (channel != null) {
+        try {
+          // A channel whose HTTP upgrade failed may never complete close().
+          unawaited(channel.sink.close().catchError((_) {}));
+        } catch (_) {
+          // The failed HTTP upgrade may already have closed the socket.
         }
       }
+      throw StateError(
+        'ASR handshake failed for ${candidate.endpoint.host} '
+        '(${candidate.resourceId}): $error',
+      );
     }
-    throw StateError('ASR WebSocket handshake failed: $lastError');
   }
 
-  List<({Uri endpoint, String resourceId})> _asrCandidates() {
-    final configured = (
-      endpoint: Uri.parse(settings.asrEndpoint),
+  ({Uri endpoint, String resourceId}) _asrCandidate() {
+    return (
+      endpoint: Uri.parse(
+        AiSettings.normalizeAsrEndpoint(settings.asrEndpoint),
+      ),
       resourceId: settings.asrResourceId,
     );
-    if (configured.endpoint.host != 'speech.bytedance.com') {
-      return [configured];
-    }
-    const base = 'wss://speech.bytedance.com/api/v3/sauc/v2/';
-    final standard = (
-      endpoint: Uri.parse('${base}bigmodel_async'),
-      resourceId: 'asr.streaming.model.big',
-    );
-    final twoPass = (
-      endpoint: Uri.parse('${base}bigmodel_async_twopass'),
-      resourceId: 'asr.streaming.model.big.twopass',
-    );
-    final fallback = configured.resourceId == twoPass.resourceId
-        ? standard
-        : twoPass;
-    return [configured, if (fallback != configured) fallback];
   }
 
   Future<String> _readAsrResponses(Stream<Object?> responses) async {

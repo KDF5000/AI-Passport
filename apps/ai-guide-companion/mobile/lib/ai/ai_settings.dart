@@ -4,6 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 final class AiSettings {
   static const defaultArkModel = '';
   static const defaultSailVoice = 'zh_female_qingxin';
+  static const defaultAsrEndpoint =
+      'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async';
+  static const internalAsrHost = 'speech.byted.org';
+  static const externalAsrHost = 'speech.bytedance.com';
 
   const AiSettings({
     this.arkBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3',
@@ -14,8 +18,7 @@ final class AiSettings {
     this.speechAccessKey = '',
     this.speechSecretKey = '',
     this.speechToken = '',
-    this.asrEndpoint =
-        'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async',
+    this.asrEndpoint = defaultAsrEndpoint,
     this.asrResourceId = 'asr.streaming.model.big',
     this.asrCluster = '',
     this.ttsEndpoint = 'wss://openspeech.bytedance.com/api/v1/tts/ws_binary',
@@ -37,6 +40,32 @@ final class AiSettings {
   final String ttsEndpoint;
   final String ttsCluster;
   final String ttsVoice;
+
+  static String normalizeAsrEndpoint(String? value) {
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) {
+      return defaultAsrEndpoint;
+    }
+    final endpoint = Uri.tryParse(raw);
+    if (endpoint == null || endpoint.host.isEmpty) return defaultAsrEndpoint;
+    if (endpoint.host == internalAsrHost || endpoint.host == externalAsrHost) {
+      final path = endpoint.path.endsWith('/bigmodel_async_twopass')
+          ? '/api/v3/sauc/v2/bigmodel_async_twopass'
+          : '/api/v3/sauc/v2/bigmodel_async';
+      return Uri(scheme: 'wss', host: externalAsrHost, path: path).toString();
+    }
+    if (endpoint.scheme != 'wss' && endpoint.scheme != 'ws') {
+      return defaultAsrEndpoint;
+    }
+    return Uri(
+      scheme: endpoint.scheme,
+      userInfo: endpoint.userInfo,
+      host: endpoint.host,
+      port: endpoint.hasPort ? endpoint.port : null,
+      path: endpoint.path,
+      query: endpoint.hasQuery ? endpoint.query : null,
+    ).toString();
+  }
 
   AiSettings copyWith({
     String? arkBaseUrl,
@@ -93,9 +122,9 @@ final class AiSettingsStore {
       speechAccessKey: secrets[1] ?? '',
       speechSecretKey: secrets[2] ?? '',
       speechToken: secrets[3] ?? '',
-      asrEndpoint:
-          prefs.getString('asrEndpoint') ??
-          'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async',
+      asrEndpoint: AiSettings.normalizeAsrEndpoint(
+        prefs.getString('asrEndpoint'),
+      ),
       asrResourceId:
           prefs.getString('asrResourceId') ?? 'asr.streaming.model.big',
       asrCluster: prefs.getString('asrCluster') ?? '',
@@ -116,7 +145,10 @@ final class AiSettingsStore {
       prefs.setString('arkChatPath', value.arkChatPath),
       prefs.setString('arkModel', value.arkModel),
       prefs.setString('speechAppId', value.speechAppId),
-      prefs.setString('asrEndpoint', value.asrEndpoint),
+      prefs.setString(
+        'asrEndpoint',
+        AiSettings.normalizeAsrEndpoint(value.asrEndpoint),
+      ),
       prefs.setString('asrResourceId', value.asrResourceId),
       prefs.setString('asrCluster', value.asrCluster),
       prefs.setString('ttsEndpoint', value.ttsEndpoint),

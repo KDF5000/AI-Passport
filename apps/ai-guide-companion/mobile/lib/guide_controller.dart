@@ -8,8 +8,10 @@ import 'ai/ai_settings.dart';
 import 'ai/sentence_chunker.dart';
 import 'audio/guide_audio_cache.dart';
 import 'audio/mobile_voice.dart';
+import 'audio/timed_text_reveal.dart';
 import 'audio/wav_codec.dart';
 import 'ble/guide_ble_session.dart';
+import 'platform/background_execution.dart';
 import 'protocol/guide_protocol.dart';
 import 'protocol/ima_adpcm.dart';
 import 'protocol/trip_protocol.dart';
@@ -21,9 +23,11 @@ final class GuideController extends ChangeNotifier {
     AiSettingsStore? store,
     TripPlanStore? tripStore,
     GuideAudioCache? audioCache,
+    BackgroundExecution? backgroundExecution,
   }) : store = store ?? AiSettingsStore(),
        tripStore = tripStore ?? TripPlanStore(),
-       audioCache = audioCache ?? GuideAudioCache() {
+       audioCache = audioCache ?? GuideAudioCache(),
+       backgroundExecution = backgroundExecution ?? IosBackgroundExecution() {
     ble = GuideBleSession(onPacket: _onPacket, onState: _onBleState);
     mobileVoice = MobileVoice();
   }
@@ -31,11 +35,14 @@ final class GuideController extends ChangeNotifier {
   final AiSettingsStore store;
   final TripPlanStore tripStore;
   final GuideAudioCache audioCache;
+  final BackgroundExecution backgroundExecution;
   final TripPlanner tripPlanner = const TripPlanner();
   late final GuideBleSession ble;
   late final MobileVoice mobileVoice;
   AiSettings settings = const AiSettings();
   TripPlan trip = TripPlan.empty;
+  List<TripPlan> trips = const [];
+  int selectedTripIndex = 0;
   TripPlan? tripDraft;
   GuideConnectionState connection = GuideConnectionState.disconnected;
   String status = 'Load settings, then connect your Passport';
@@ -54,10 +61,12 @@ final class GuideController extends ChangeNotifier {
   final List<Map<String, String>> _history = [];
   int _sampleRate = 16000;
   int _operationId = 0;
+  int? _passportPlaybackOperation;
   Timer? _slowResponseTimer;
   AiGateway? _activeGateway;
   bool _tripGenerationCancelled = false;
   bool _disposed = false;
+  Future<bool>? _passportBackgroundLease;
 
   bool get canCancel => busy && !phoneRecording;
   bool get hasTrip => !trip.isEmpty;
@@ -67,11 +76,29 @@ final class GuideController extends ChangeNotifier {
       trip.stops.where((stop) => stop.completed).length;
 
   Future<void> load() async {
-    final values = await Future.wait<Object>([store.load(), tripStore.load()]);
+    try {
+      await ble.initialize();
+    } catch (error) {
+      debugPrint('BLE initialization unavailable: $error');
+    }
+    final values = await Future.wait<Object>([
+      store.load(),
+      tripStore.loadLibrary(),
+    ]);
     settings = values[0] as AiSettings;
-    trip = values[1] as TripPlan;
+    final library = values[1] as TripLibrary;
+    trips = library.trips;
+    selectedTripIndex = library.selectedIndex;
+    trip = library.selectedTrip;
     await _refreshCacheCount();
     notifyListeners();
+    try {
+      await ble.restoreConnection();
+    } catch (error) {
+      // Bluetooth may be unavailable or denied during launch. Manual connect
+      // remains available and reports its own actionable error.
+      debugPrint('BLE state restoration unavailable: $error');
+    }
   }
 
   Future<TripPlan?> generateTripDraft(TripRequest request) async {
@@ -118,12 +145,38 @@ final class GuideController extends ChangeNotifier {
 
   Future<void> saveTripDraft(TripPlan value) async {
     trip = value.copyWith(currentIndex: 0);
+    trips = [...trips, trip];
+    selectedTripIndex = trips.length - 1;
     tripDraft = null;
-    await tripStore.save(trip);
+    await _saveTripLibrary();
     await _refreshCacheCount();
     tripStatus = '路线已保存到手机';
     notifyListeners();
     if (connection == GuideConnectionState.connected) await syncTrip();
+  }
+
+  Future<void> selectTrip(int index) async {
+    if (index < 0 || index >= trips.length || index == selectedTripIndex) {
+      return;
+    }
+    selectedTripIndex = index;
+    trip = trips[index];
+    await _saveTripLibrary();
+    await _refreshCacheCount();
+    tripStatus = '已切换到「${trip.title}」';
+    notifyListeners();
+    if (connection == GuideConnectionState.connected) await syncTrip();
+  }
+
+  Future<void> _saveTripLibrary() async {
+    if (trips.isNotEmpty && selectedTripIndex < trips.length) {
+      final updated = [...trips];
+      updated[selectedTripIndex] = trip;
+      trips = updated;
+    }
+    await tripStore.saveLibrary(
+      TripLibrary(trips: trips, selectedIndex: selectedTripIndex),
+    );
   }
 
   Future<void> saveSettings(AiSettings value) async {
@@ -151,6 +204,8 @@ final class GuideController extends ChangeNotifier {
     notifyListeners();
     if (value == GuideConnectionState.connected) {
       unawaited(syncTrip());
+    } else if (value == GuideConnectionState.disconnected) {
+      unawaited(_endPassportBackgroundLease());
     }
   }
 
@@ -165,6 +220,9 @@ final class GuideController extends ChangeNotifier {
         transcript = '';
         answer = '';
         status = 'Listening…';
+        _passportBackgroundLease ??= backgroundExecution.begin(
+          'Passport voice question',
+        );
         notifyListeners();
       case GuidePacketType.recordingAudio:
         final decoded = ImaAdpcm.decode(Uint8List.sublistView(packet, 1));
@@ -174,7 +232,11 @@ final class GuideController extends ChangeNotifier {
           );
         }
       case GuidePacketType.recordingEnd:
-        unawaited(_processRecording());
+        if (_recording.isEmpty) {
+          unawaited(_endPassportBackgroundLease());
+        } else {
+          unawaited(_processRecording());
+        }
       case GuidePacketType.tripSelect:
         if (packet.length >= 2) {
           unawaited(selectStop(packet[1], sync: false));
@@ -187,6 +249,8 @@ final class GuideController extends ChangeNotifier {
         if (packet.length >= 2) {
           unawaited(playOfflineGuide(packet[1]));
         }
+      case GuidePacketType.tripPlayCancel:
+        _cancelPassportPlayback();
       case GuidePacketType.error:
         status = String.fromCharCodes(packet.skip(1));
         notifyListeners();
@@ -218,7 +282,7 @@ final class GuideController extends ChangeNotifier {
   Future<void> selectStop(int index, {bool sync = true}) async {
     if (index < 0 || index >= trip.stops.length) return;
     trip = trip.copyWith(currentIndex: index);
-    await tripStore.save(trip);
+    await _saveTripLibrary();
     tripStatus = '${trip.stops[index].name} selected';
     notifyListeners();
     if (sync) await syncTrip();
@@ -233,7 +297,7 @@ final class GuideController extends ChangeNotifier {
     final stops = [...trip.stops];
     stops[index] = stops[index].copyWith(completed: completed);
     trip = trip.copyWith(stops: stops, currentIndex: index);
-    await tripStore.save(trip);
+    await _saveTripLibrary();
     tripStatus = completed ? 'Stop completed' : 'Stop reopened';
     notifyListeners();
     if (sync) await syncTrip();
@@ -264,10 +328,7 @@ final class GuideController extends ChangeNotifier {
         if (await audioCache.contains(key)) continue;
         tripStatus = 'Caching guide ${index + 1}/${trip.stops.length}';
         notifyListeners();
-        final script = stop.guideScript.isEmpty
-            ? stop.summary
-            : stop.guideScript;
-        final audio = await gateway.synthesize('${stop.name}。$script');
+        final audio = await gateway.synthesize(stop.guideNarration);
         await audioCache.write(key, audio);
       }
       await _refreshCacheCount();
@@ -283,9 +344,33 @@ final class GuideController extends ChangeNotifier {
   }
 
   Future<void> playOfflineGuide([int? requestedIndex]) async {
-    if (busy) return;
+    if (busy) {
+      tripStatus = 'Another task is running · try OK again shortly';
+      notifyListeners();
+      if (connection == GuideConnectionState.connected) {
+        try {
+          await ble.sendText(
+            GuidePacketType.error,
+            'Phone is busy. Press OK again shortly.',
+          );
+        } catch (_) {}
+      }
+      return;
+    }
     final index = requestedIndex ?? trip.currentIndex;
-    if (index < 0 || index >= trip.stops.length) return;
+    if (index < 0 || index >= trip.stops.length) {
+      tripStatus = 'Route is not ready · sync it from the phone';
+      notifyListeners();
+      if (connection == GuideConnectionState.connected) {
+        try {
+          await ble.sendText(
+            GuidePacketType.error,
+            'Route is not ready. Sync it from the phone.',
+          );
+        } catch (_) {}
+      }
+      return;
+    }
     if (index != trip.currentIndex) await selectStop(index, sync: false);
     final stop = trip.stops[index];
     final audio = await audioCache.read(_guideCacheKey(stop));
@@ -305,6 +390,9 @@ final class GuideController extends ChangeNotifier {
     busy = true;
     final operation = ++_operationId;
     final playOnPassport = connection == GuideConnectionState.connected;
+    if (playOnPassport) {
+      _passportPlaybackOperation = operation;
+    }
     tripStatus = playOnPassport
         ? '正在 Passport 播放缓存讲解 · 未使用网络'
         : '正在手机播放缓存讲解 · 未使用网络';
@@ -316,11 +404,11 @@ final class GuideController extends ChangeNotifier {
           wave.sampleRate & 0xff,
           wave.sampleRate >> 8,
         ]);
-        await ble.sendText(
-          GuidePacketType.answerText,
-          '${stop.name}\n${stop.summary}',
+        await _sendWaveToPassport(
+          wave,
+          operation,
+          revealedText: stop.guideNarration,
         );
-        await _sendWaveToPassport(wave, operation);
         if (operation == _operationId) {
           await ble.send(GuidePacketType.responseEnd);
         }
@@ -330,11 +418,24 @@ final class GuideController extends ChangeNotifier {
     } catch (error) {
       tripStatus = 'Offline playback failed: $error';
     } finally {
+      if (_passportPlaybackOperation == operation) {
+        _passportPlaybackOperation = null;
+      }
       if (operation == _operationId) {
         busy = false;
         notifyListeners();
       }
     }
+  }
+
+  void _cancelPassportPlayback() {
+    final operation = _passportPlaybackOperation;
+    if (!busy || operation == null || operation != _operationId) return;
+    _passportPlaybackOperation = null;
+    _operationId += 1;
+    busy = false;
+    tripStatus = 'Passport playback stopped';
+    notifyListeners();
   }
 
   String _contextualPrompt(String question) {
@@ -576,7 +677,18 @@ final class GuideController extends ChangeNotifier {
   }
 
   Future<void> _processRecording() async {
-    if (busy || _recording.isEmpty) return;
+    if (busy || _recording.isEmpty) {
+      await _endPassportBackgroundLease();
+      return;
+    }
+    _passportBackgroundLease ??= backgroundExecution.begin(
+      'Passport voice question',
+    );
+    try {
+      await _passportBackgroundLease;
+    } catch (error) {
+      debugPrint('Could not begin iOS background task: $error');
+    }
     busy = true;
     status = 'Transcribing…';
     notifyListeners();
@@ -604,11 +716,24 @@ final class GuideController extends ChangeNotifier {
     } finally {
       _recording.clear();
       gateway.close();
+      await _endPassportBackgroundLease();
       if (operation == _operationId) {
         _activeGateway = null;
         busy = false;
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> _endPassportBackgroundLease() async {
+    final lease = _passportBackgroundLease;
+    _passportBackgroundLease = null;
+    if (lease == null) return;
+    try {
+      await lease;
+      await backgroundExecution.end();
+    } catch (error) {
+      debugPrint('Could not end iOS background task: $error');
     }
   }
 
@@ -668,10 +793,9 @@ final class GuideController extends ChangeNotifier {
            * Sending text from the LLM stream makes the display race ahead
            * while TTS synthesis is still queued.
            */
-          await ble.sendText(GuidePacketType.answerText, phrase);
           status = 'Playing answer on Passport…';
           notifyListeners();
-          await _sendWaveToPassport(wave, operation);
+          await _sendWaveToPassport(wave, operation, revealedText: phrase);
         } catch (error, stack) {
           speechError ??= error;
           speechStack ??= stack;
@@ -715,9 +839,16 @@ final class GuideController extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendWaveToPassport(PcmWave wave, int operation) async {
+  Future<void> _sendWaveToPassport(
+    PcmWave wave,
+    int operation, {
+    String revealedText = '',
+  }) async {
     const blockSamples = 320;
     const transmissionHeadroom = 0.98;
+    final totalBlocks =
+        (wave.samples.length + blockSamples - 1) ~/ blockSamples;
+    final textReveal = TimedTextReveal(revealedText, totalSteps: totalBlocks);
     final clock = Stopwatch()..start();
     final encoder = ImaAdpcmEncoder();
     var blocksSent = 0;
@@ -728,6 +859,10 @@ final class GuideController extends ChangeNotifier {
       chunk.setRange(0, end - offset, wave.samples, offset);
       await ble.sendAudio(encoder.encode(chunk));
       blocksSent += 1;
+      final textChunk = textReveal.takeStep(blocksSent);
+      if (textChunk.isNotEmpty && operation == _operationId) {
+        await ble.sendText(GuidePacketType.answerText, textChunk);
+      }
       final target = Duration(
         microseconds:
             blocksSent *
@@ -783,6 +918,7 @@ final class GuideController extends ChangeNotifier {
     _operationId += 1;
     _slowResponseTimer?.cancel();
     _activeGateway?.close();
+    unawaited(_endPassportBackgroundLease());
     unawaited(ble.disconnect());
     unawaited(mobileVoice.dispose());
     super.dispose();

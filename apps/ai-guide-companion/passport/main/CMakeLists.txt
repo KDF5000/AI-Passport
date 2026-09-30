@@ -3,6 +3,7 @@ idf_component_register(
          "guide_app.c"
          "guide_ble.c"
          "guide_adpcm.c"
+         "guide_playback_state.c"
          "guide_utf8.c"
     INCLUDE_DIRS "."
     REQUIRES bsp bt nvs_flash

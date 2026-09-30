@@ -77,7 +77,10 @@ AI Passport 固件组成。手机负责规划并保存行程、在用户明确�
   重试，但无法绕过服务端配额。
 
 申请完成后，在手机设置中填写 **Speech AppKey**、**Speech AK** 和
-**Speech SK**。CN 接口地址、资源 ID 和默认音色已经内置，无需普通用户填写。
+**Speech SK**。CN 接口地址
+`wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async`（客户端外网
+地址）、资源 ID 和默认音色已经内置，无需普通用户填写。旧版本保存的错误 ASR
+地址会在启动时自动迁移。
 
 如果返回 `UserNotFound` / `40200141`，通常是 AppKey 或 AK/SK 属于另一个
 环境或地区，例如把 BOE 凭据用于 CN 生产接口。应核对申请地区和应用绑定关系，
@@ -124,8 +127,11 @@ idf.py -p <serial-port> flash monitor
 5. Passport 上使用 UP / DOWN 切换站点；短按 OK 播放缓存讲解；双击 OK
    切换完成状态；长按 OK 录制问题。播放时 UP / DOWN 调音量，OK 停止。
 
-Passport 未连接时，缓存讲解仍可直接从手机播放。当前 BLE 中转要求手机应用保持
-前台运行。
+Passport 未连接时，缓存讲解仍可直接从手机播放。手机应用先连接 Passport 后，
+iOS 锁屏时可继续维持 BLE 会话；从 Passport 发起一轮语音提问时，应用会申请有
+时限的后台处理窗口，用于完成识别、AI 回答、语音合成和 BLE 回传。若处理时间过
+长，iOS 仍可能挂起任务；网络或 VPN 中断会导致在线问答失败。从多任务界面强制
+划掉应用后，锁屏中转会失效，需要重新打开应用并连接。
 
 ## 联网与调用成本边界
 

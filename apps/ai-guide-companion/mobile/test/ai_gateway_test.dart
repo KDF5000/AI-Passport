@@ -15,6 +15,45 @@ void main() {
     expect(const AiSettings().arkModel, isEmpty);
   });
 
+  test('uses the documented CN production ASR WebSocket endpoint', () {
+    expect(
+      const AiSettings().asrEndpoint,
+      'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async',
+    );
+    expect(const AiSettings().asrResourceId, 'asr.streaming.model.big');
+  });
+
+  test('migrates internal and malformed ASR endpoints to CN client host', () {
+    expect(
+      AiSettings.normalizeAsrEndpoint(
+        'https://speech.byted.org:0/api/v3/sauc/v2/'
+        'bigmodel_async_twopass#',
+      ),
+      'wss://speech.bytedance.com/api/v3/sauc/v2/'
+      'bigmodel_async_twopass',
+    );
+    expect(
+      AiSettings.normalizeAsrEndpoint(
+        'wss://speech.bytedance.com:443/api/v3/sauc/v2/'
+        'bigmodel_async?bad=1#bad',
+      ),
+      AiSettings.defaultAsrEndpoint,
+    );
+  });
+
+  test('preserves valid custom ASR WebSocket endpoints', () {
+    expect(
+      AiSettings.normalizeAsrEndpoint(
+        'wss://speech.example.test/custom/asr#ignored',
+      ),
+      'wss://speech.example.test/custom/asr',
+    );
+    expect(
+      AiSettings.normalizeAsrEndpoint('https://speech.example.test/asr'),
+      AiSettings.defaultAsrEndpoint,
+    );
+  });
+
   const settings = AiSettings(
     arkBaseUrl: 'https://example.test/api/v3',
     arkChatPath: '/chat/completions',
@@ -304,6 +343,52 @@ void main() {
     expect(last.sequence, -2);
     expect(last.isLast, isTrue);
     expect(last.payload.length, 3200);
+  });
+
+  test('uses only the configured ASR resource on the CN client host', () async {
+    Uri? connectedUri;
+    Map<String, String>? connectedHeaders;
+    var attempts = 0;
+    final gateway = AiGateway(
+      sailSettings.copyWith(
+        asrEndpoint:
+            'https://speech.byted.org:0/api/v3/sauc/v2/'
+            'bigmodel_async_twopass#',
+        asrResourceId: 'asr.streaming.model.big.twopass',
+      ),
+      websocket: (uri, headers) async {
+        attempts += 1;
+        connectedUri = uri;
+        connectedHeaders = Map<String, String>.from(headers);
+        throw StateError('stop after URI capture');
+      },
+    );
+
+    await expectLater(
+      gateway.transcribePcm(Uint8List.fromList([0, 0])),
+      throwsA(
+        isA<StateError>().having(
+          (value) => value.message,
+          'message',
+          contains('asr.streaming.model.big.twopass'),
+        ),
+      ),
+    );
+
+    final uri = connectedUri;
+    expect(uri, isNotNull);
+    expect(
+      uri.toString(),
+      'wss://speech.bytedance.com/api/v3/sauc/v2/'
+      'bigmodel_async_twopass',
+    );
+    expect(uri!.hasPort, isFalse);
+    expect(uri.hasFragment, isFalse);
+    expect(
+      connectedHeaders?['X-Api-Resource-Id'],
+      'asr.streaming.model.big.twopass',
+    );
+    expect(attempts, 1);
   });
 }
 

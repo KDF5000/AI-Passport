@@ -44,6 +44,9 @@ final class TripStop {
   final bool fixed;
   final bool completed;
 
+  String get guideNarration =>
+      '$name。${guideScript.isEmpty ? summary : guideScript}';
+
   TripStop copyWith({
     String? name,
     String? time,
@@ -279,26 +282,72 @@ final class TripRequest {
 }
 
 final class TripPlanStore {
-  static const _key = 'offlineTripPlanV1';
+  static const _legacyKey = 'offlineTripPlanV1';
+  static const _libraryKey = 'offlineTripLibraryV2';
 
-  Future<TripPlan> load() async {
-    final raw = (await SharedPreferences.getInstance()).getString(_key);
-    if (raw == null) return TripPlan.empty;
+  Future<TripLibrary> loadLibrary() async {
+    final prefs = await SharedPreferences.getInstance();
+    final libraryRaw = prefs.getString(_libraryKey);
+    if (libraryRaw != null) {
+      try {
+        return TripLibrary.fromJson(
+          (jsonDecode(libraryRaw) as Map).cast<String, Object?>(),
+        );
+      } catch (_) {
+        // Fall through to the legacy record instead of losing a valid trip.
+      }
+    }
+
+    final legacyRaw = prefs.getString(_legacyKey);
+    if (legacyRaw == null) return TripLibrary.empty;
     try {
-      return TripPlan.fromJson(
-        (jsonDecode(raw) as Map).cast<String, Object?>(),
+      final legacy = TripPlan.fromJson(
+        (jsonDecode(legacyRaw) as Map).cast<String, Object?>(),
       );
+      final migrated = TripLibrary(trips: [legacy], selectedIndex: 0);
+      await saveLibrary(migrated);
+      return migrated;
     } catch (_) {
-      return TripPlan.empty;
+      return TripLibrary.empty;
     }
   }
 
-  Future<void> save(TripPlan plan) async {
+  Future<void> saveLibrary(TripLibrary library) async {
     await (await SharedPreferences.getInstance()).setString(
-      _key,
-      jsonEncode(plan.toJson()),
+      _libraryKey,
+      jsonEncode(library.toJson()),
     );
   }
+}
+
+final class TripLibrary {
+  const TripLibrary({required this.trips, required this.selectedIndex});
+
+  final List<TripPlan> trips;
+  final int selectedIndex;
+
+  TripPlan get selectedTrip =>
+      trips.isEmpty ? TripPlan.empty : trips[selectedIndex];
+
+  Map<String, Object> toJson() => {
+    'selectedIndex': selectedIndex,
+    'trips': trips.map((trip) => trip.toJson()).toList(),
+  };
+
+  factory TripLibrary.fromJson(Map<String, Object?> json) {
+    final trips = (json['trips'] as List? ?? const [])
+        .map((item) => TripPlan.fromJson((item as Map).cast<String, Object?>()))
+        .where((trip) => !trip.isEmpty)
+        .toList(growable: false);
+    if (trips.isEmpty) return empty;
+    final rawIndex = json['selectedIndex'] as int? ?? 0;
+    return TripLibrary(
+      trips: trips,
+      selectedIndex: rawIndex.clamp(0, trips.length - 1),
+    );
+  }
+
+  static const empty = TripLibrary(trips: [], selectedIndex: 0);
 }
 
 String _requiredString(Map<String, Object?> json, String key) {

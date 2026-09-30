@@ -3,11 +3,13 @@
 #include "bsp_audio.h"
 #include "bsp_display.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "guide_adpcm.h"
 #include "guide_ble.h"
+#include "guide_playback_state.h"
 #include "guide_utf8.h"
 #include "lvgl.h"
 #include <stdio.h>
@@ -25,12 +27,16 @@ LV_FONT_DECLARE(guide_font_14);
 #define VOLUME_STEP 10
 #define VOLUME_MIN 10
 #define MAX_PACKET 513
-#define TEXT_CAPACITY 768
+#define ANSWER_TEXT_CAPACITY 2304
+#define QUESTION_TEXT_CAPACITY 768
 #define MAX_TRIP_STOPS 8
 #define TRIP_TITLE_CAPACITY 64
 #define STOP_NAME_CAPACITY 64
 #define STOP_TIME_CAPACITY 12
 #define STOP_SUMMARY_CAPACITY 192
+#define OK_CLICK_SUPPRESS_MS 1000
+
+static const char *TAG = "guide_app";
 
 enum {
     PKT_RECORD_START = 0x01,
@@ -48,6 +54,7 @@ enum {
     PKT_TRIP_SELECT = 0x30,
     PKT_TRIP_COMPLETION = 0x31,
     PKT_TRIP_PLAY_REQUEST = 0x32,
+    PKT_TRIP_PLAY_CANCEL = 0x33,
     PKT_ERROR = 0x7f,
 };
 
@@ -134,13 +141,13 @@ static lv_obj_t *s_title;
 static lv_obj_t *s_question;
 static lv_obj_t *s_text;
 static lv_obj_t *s_text_card;
-static char s_answer[TEXT_CAPACITY];
-static char s_question_text[TEXT_CAPACITY];
+static char s_answer[ANSWER_TEXT_CAPACITY];
+static char s_question_text[QUESTION_TEXT_CAPACITY];
 static size_t s_answer_length;
 static bool s_receiving_answer;
 static trip_plan_t s_trip;
 static trip_plan_t s_trip_staging;
-static bool s_suppress_next_ok_click;
+static int64_t s_suppress_ok_click_until_us;
 
 static void set_ui(const char *title, const char *status, uint32_t color);
 static void set_text(const char *text);
@@ -371,6 +378,16 @@ static void audio_worker(void *arg)
             ? pdMS_TO_TICKS(PLAYBACK_UNDERRUN_MS)
             : portMAX_DELAY;
         if (xQueueReceive(s_audio_queue, &command, wait) != pdTRUE) {
+            if (guide_playback_queue_drained(s_playing, s_playback_ending)) {
+                s_playing = false;
+                s_playback_primed = false;
+                s_playback_started = false;
+                s_playback_ending = false;
+                s_playback_stop_requested = false;
+                ESP_LOGI(TAG, "playback finished after audio queue drained");
+                show_current_stop();
+                continue;
+            }
             /*
              * The speaker consumes one packet every 20 ms. If BLE or the next
              * TTS phrase arrives late, stop consuming until a small reservoir
@@ -484,6 +501,17 @@ static void protocol_worker(void *arg)
         } else if (type == PKT_PLAY_START) {
             if (bsp_audio_set_format(SAMPLE_RATE, 16, 1) == ESP_OK) {
                 bsp_audio_set_volume(s_volume_percent);
+                /*
+                 * PLAY_START is the boundary of a new playback operation.
+                 * A cancelled operation deliberately has no RESPONSE_END, so
+                 * it cannot be used as the only place to close the previous
+                 * text stream. Reset here before the first text packet of a
+                 * replay arrives.
+                 */
+                guide_playback_text_start(&s_receiving_answer,
+                                           &s_answer_length);
+                s_answer[0] = '\0';
+                set_text("");
                 s_playing = true;
                 s_playback_primed = false;
                 s_playback_started = false;
@@ -505,10 +533,19 @@ static void protocol_worker(void *arg)
                 guide_utf8_complete_prefix((const uint8_t *)s_answer,
                                            s_answer_length);
             s_answer[s_answer_length] = '\0';
-            s_receiving_answer = false;
+            guide_playback_text_stop(&s_receiving_answer);
             s_playback_ending = true;
             audio_command_t command = {.type = AUDIO_END_PLAYBACK};
-            (void)xQueueSend(s_audio_queue, &command, pdMS_TO_TICKS(200));
+            if (xQueueSend(s_audio_queue, &command,
+                           pdMS_TO_TICKS(200)) != pdTRUE) {
+                /*
+                 * A full queue contains audio that still needs to play. The
+                 * audio task will finish when it drains the queue and observes
+                 * s_playback_ending, so a dropped sentinel cannot leave
+                 * s_playing stuck forever.
+                 */
+                ESP_LOGW(TAG, "playback end sentinel deferred until queue drain");
+            }
         } else if (type == PKT_TRIP_BEGIN && packet.length >= 3) {
             uint8_t count = packet.data[1];
             uint8_t current = packet.data[2];
@@ -588,8 +625,16 @@ static void app_worker(void *arg)
             stop_recording();
         } else if (event.type == APP_STOP_AUDIO) {
             s_playback_stop_requested = true;
+            guide_playback_text_stop(&s_receiving_answer);
+            const uint8_t cancel = PKT_TRIP_PLAY_CANCEL;
+            if (notify_retry(&cancel, 1) != ESP_OK) {
+                ESP_LOGW(TAG, "phone did not acknowledge playback cancellation");
+            }
             audio_command_t stop = {.type = AUDIO_STOP_PLAYBACK};
-            (void)xQueueSend(s_audio_queue, &stop, 0);
+            xQueueReset(s_audio_queue);
+            if (xQueueSendToFront(s_audio_queue, &stop, 0) != pdTRUE) {
+                ESP_LOGE(TAG, "failed to queue playback stop");
+            }
         } else if (event.type == APP_VOLUME_UP ||
                    event.type == APP_VOLUME_DOWN) {
             if (event.type == APP_VOLUME_UP) {
@@ -622,15 +667,25 @@ static void app_worker(void *arg)
             show_current_stop();
             notify_trip_state(PKT_TRIP_SELECT);
         } else if (event.type == APP_PLAY_STOP) {
-            if (!s_trip.ready || !guide_ble_ready()) {
-                show_current_stop();
+            if (!s_trip.ready) {
+                set_ui(NULL, "Sync a route from the phone first", 0xd4534b);
+                ESP_LOGW(TAG, "offline playback ignored: route not ready");
+                continue;
+            }
+            if (!guide_ble_ready()) {
+                set_ui(NULL, "Reconnect the phone to play", 0xd4534b);
+                ESP_LOGW(TAG, "offline playback ignored: BLE not ready");
                 continue;
             }
             uint8_t packet[] = {PKT_TRIP_PLAY_REQUEST, s_trip.current};
             if (notify_retry(packet, sizeof(packet)) == ESP_OK) {
                 set_ui(NULL, "Loading offline guide...", 0x7c6ed1);
+                ESP_LOGI(TAG, "offline playback requested for stop %u",
+                         s_trip.current);
             } else {
                 set_ui(NULL, "Phone not ready", 0xd4534b);
+                ESP_LOGW(TAG, "offline playback request failed for stop %u",
+                         s_trip.current);
             }
         } else if (event.type == APP_TOGGLE_COMPLETE) {
             if (!s_trip.ready || s_trip.current >= s_trip.count) continue;
@@ -903,7 +958,7 @@ static void create_ui(void)
     lv_obj_set_style_border_width(s_text_card, 0, 0);
     lv_obj_set_style_pad_all(s_text_card, 14, 0);
     lv_obj_set_scroll_dir(s_text_card, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(s_text_card, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scrollbar_mode(s_text_card, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *answer_tag = lv_label_create(s_text_card);
     lv_label_set_text(answer_tag, "导游回答");
@@ -921,7 +976,7 @@ static void create_ui(void)
     lv_label_set_text(s_text, "按住 OK 说话，松开后发送。");
 
     create_footer_label(s_qa_view, "UP VOL+", 10, COLOR_HEADER);
-    create_footer_label(s_qa_view, "OK PAUSE", 86, COLOR_TICKET);
+    create_footer_label(s_qa_view, "OK STOP", 86, COLOR_TICKET);
     create_footer_label(s_qa_view, "DOWN VOL-", 162, COLOR_HEADER);
 
     lv_screen_load(screen);
@@ -957,16 +1012,20 @@ void guide_app_button(bsp_btn_t button, bsp_btn_ev_t event)
     } else if (button == BSP_BTN_OK && event == BSP_BTN_RELEASE) {
         app_event.type = APP_RELEASE_OK;
     } else if (button == BSP_BTN_OK && event == BSP_BTN_PRESS && s_playing) {
-        s_suppress_next_ok_click = true;
+        s_suppress_ok_click_until_us =
+            esp_timer_get_time() + (int64_t)OK_CLICK_SUPPRESS_MS * 1000;
         app_event.type = APP_STOP_AUDIO;
     } else if (button == BSP_BTN_OK && event == BSP_BTN_DOUBLE &&
                !s_playing && !s_recording) {
         app_event.type = APP_TOGGLE_COMPLETE;
     } else if (button == BSP_BTN_OK && event == BSP_BTN_CLICK &&
                !s_playing && !s_recording) {
-        if (s_suppress_next_ok_click) {
-            s_suppress_next_ok_click = false;
+        int64_t now_us = esp_timer_get_time();
+        if (s_suppress_ok_click_until_us > now_us) {
+            s_suppress_ok_click_until_us = 0;
+            ESP_LOGI(TAG, "ignored click paired with playback stop");
         } else {
+            s_suppress_ok_click_until_us = 0;
             app_event.type = APP_PLAY_STOP;
         }
     }

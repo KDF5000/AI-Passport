@@ -92,8 +92,11 @@ Ask the Speech/SAIL service owner to create or authorize one application in the
   service quota.
 
 Enter the resulting **Speech AppKey**, **Speech AK**, and **Speech SK** in the
-phone settings. The CN endpoints, resource IDs, and default voice are already
-configured in the app.
+phone settings. The CN ASR endpoint
+`wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async` (the client-facing
+external endpoint), resource IDs, and default voice are already configured in
+the app. A bad ASR URL saved by an older build is migrated automatically at
+startup.
 
 `UserNotFound` / `40200141` normally means the AppKey or credentials belong to
 a different environment or region, such as BOE credentials being sent to the
@@ -147,7 +150,12 @@ running it.
    During playback, UP/DOWN changes volume and OK stops.
 
 If Passport is disconnected, cached guides can still play through the phone.
-The app currently needs to remain in the foreground for BLE relay behavior.
+After the app has connected to Passport, iOS can keep that BLE session active
+while the phone is locked. A Passport voice question receives a bounded
+background-processing window for ASR, AI, TTS, and BLE playback. iOS may still
+suspend long work; network or VPN loss interrupts online questions, and
+force-quitting the app from the app switcher disables lock-screen relay until
+the app is opened and connected again.
 
 ## Network and cost boundaries
 

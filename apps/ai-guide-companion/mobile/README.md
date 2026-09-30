@@ -27,6 +27,12 @@ Use profile or release mode when an iPhone build must launch independently
 from the Home Screen. Debug builds require an active Flutter/Xcode development
 session on iOS 14 and later.
 
+On iOS, connect Passport before locking the phone. The app opts into BLE
+Central restoration and protects each Passport voice question with a bounded
+background task. This supports lock-screen relay but not indefinite execution:
+iOS may suspend long work, network or VPN loss interrupts online requests, and
+force-quitting the app disables relay until it is reopened and reconnected.
+
 ## Runtime configuration
 
 Open **Settings** and provide:

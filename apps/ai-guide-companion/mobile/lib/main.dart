@@ -101,6 +101,15 @@ class _GuideHomePageState extends State<GuideHomePage> {
     );
   }
 
+  Future<void> _openTripLibrary() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            TripLibraryPage(controller: controller, onCreateTrip: _createTrip),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final labels = controller.hasTrip
@@ -134,6 +143,15 @@ class _GuideHomePageState extends State<GuideHomePage> {
         ),
         actions: [
           IconButton(
+            tooltip: '我的行程',
+            onPressed: _openTripLibrary,
+            icon: Badge(
+              isLabelVisible: controller.trips.isNotEmpty,
+              label: Text('${controller.trips.length}'),
+              child: const Icon(Icons.luggage_outlined),
+            ),
+          ),
+          IconButton(
             tooltip: 'AI 服务设置',
             onPressed: _openSettings,
             icon: const Icon(Icons.tune),
@@ -147,7 +165,7 @@ class _GuideHomePageState extends State<GuideHomePage> {
             controller.hasTrip
                 ? TripTicketView(
                     controller: controller,
-                    onCreateTrip: _createTrip,
+                    onOpenLibrary: _openTripLibrary,
                   )
                 : EmptyTripView(onCreateTrip: _createTrip),
             ConversationView(controller: controller),
@@ -241,6 +259,141 @@ class EmptyTripView extends StatelessWidget {
   );
 }
 
+class TripLibraryPage extends StatelessWidget {
+  const TripLibraryPage({
+    super.key,
+    required this.controller,
+    required this.onCreateTrip,
+  });
+
+  final GuideController controller;
+  final Future<void> Function() onCreateTrip;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) => Scaffold(
+      appBar: AppBar(title: const Text('我的行程')),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: GuideColors.red,
+        foregroundColor: Colors.white,
+        onPressed: () async => onCreateTrip(),
+        icon: const Icon(Icons.add),
+        label: const Text('新建行程'),
+      ),
+      body: controller.trips.isEmpty
+          ? Center(
+              child: FilledButton.icon(
+                onPressed: () async => onCreateTrip(),
+                icon: const Icon(Icons.add_location_alt_outlined),
+                label: const Text('创建第一段行程'),
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 100),
+              children: [
+                const Text(
+                  '选择一张行程票',
+                  style: TextStyle(fontSize: 27, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  '当前行程会用于问答上下文，并同步到已连接的 Passport。',
+                  style: TextStyle(color: GuideColors.muted, height: 1.45),
+                ),
+                const SizedBox(height: 18),
+                for (final entry in controller.trips.indexed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _TripLibraryCard(
+                      trip: entry.$2,
+                      selected: entry.$1 == controller.selectedTripIndex,
+                      onTap: () async {
+                        await controller.selectTrip(entry.$1);
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                    ),
+                  ),
+              ],
+            ),
+    ),
+  );
+}
+
+class _TripLibraryCard extends StatelessWidget {
+  const _TripLibraryCard({
+    required this.trip,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final TripPlan trip;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = trip.stops.where((stop) => stop.completed).length;
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: selected ? GuideColors.green : const Color(0xffe1d8c7),
+          width: selected ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(17),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: selected
+                    ? GuideColors.green
+                    : GuideColors.mint,
+                foregroundColor: selected ? Colors.white : GuideColors.green,
+                child: Icon(
+                  selected ? Icons.check : Icons.confirmation_number_outlined,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      trip.title,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (trip.date.isNotEmpty) trip.date,
+                        '${trip.stops.length} 站',
+                        '$completed 已完成',
+                      ].join(' · '),
+                      style: const TextStyle(
+                        color: GuideColors.muted,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FlowRow extends StatelessWidget {
   const _FlowRow({
     required this.number,
@@ -290,10 +443,10 @@ class TripTicketView extends StatelessWidget {
   const TripTicketView({
     super.key,
     required this.controller,
-    required this.onCreateTrip,
+    required this.onOpenLibrary,
   });
   final GuideController controller;
-  final VoidCallback onCreateTrip;
+  final VoidCallback onOpenLibrary;
 
   @override
   Widget build(BuildContext context) {
@@ -347,6 +500,7 @@ class TripTicketView extends StatelessWidget {
                 avatar: Icon(
                   connected ? Icons.bluetooth_connected : Icons.bluetooth,
                   size: 17,
+                  color: connected ? GuideColors.ink : Colors.white,
                 ),
                 label: Text(connected ? '已连接' : '连接'),
                 onPressed: connected
@@ -468,7 +622,11 @@ class TripTicketView extends StatelessWidget {
               '今天的路线',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
             ),
-            TextButton(onPressed: onCreateTrip, child: const Text('重新规划')),
+            TextButton.icon(
+              onPressed: onOpenLibrary,
+              icon: const Icon(Icons.luggage_outlined, size: 18),
+              label: const Text('全部行程'),
+            ),
           ],
         ),
         for (final entry in trip.stops.indexed)
@@ -801,10 +959,51 @@ class _TripBuilderPageState extends State<TripBuilderPage> {
   TripPlan? draft;
 
   static String _today() {
-    final now = DateTime.now();
-    return '${now.year.toString().padLeft(4, '0')}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
+    return _formatDate(DateTime.now());
+  }
+
+  static String _formatDate(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  static String _formatTime(TimeOfDay value) =>
+      '${value.hour.toString().padLeft(2, '0')}:'
+      '${value.minute.toString().padLeft(2, '0')}';
+
+  static TimeOfDay _parseTime(String value) {
+    final parts = value.split(':');
+    return TimeOfDay(
+      hour: int.tryParse(parts.firstOrNull ?? '') ?? 0,
+      minute: int.tryParse(parts.elementAtOrNull(1) ?? '') ?? 0,
+    );
+  }
+
+  Future<void> _pickDate() async {
+    final initial = DateTime.tryParse(date.text) ?? DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+      helpText: '选择游玩日期',
+      cancelText: '取消',
+      confirmText: '确定',
+    );
+    if (selected != null) setState(() => date.text = _formatDate(selected));
+  }
+
+  Future<void> _pickTime(TextEditingController controller, String title) async {
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: _parseTime(controller.text),
+      helpText: title,
+      cancelText: '取消',
+      confirmText: '确定',
+    );
+    if (selected != null) {
+      setState(() => controller.text = _formatTime(selected));
+    }
   }
 
   @override
@@ -819,48 +1018,64 @@ class _TripBuilderPageState extends State<TripBuilderPage> {
 
   Future<void> _addEvent() async {
     final name = TextEditingController();
-    final time = TextEditingController();
+    var selectedTime = const TimeOfDay(hour: 15, minute: 30);
     final value = await showDialog<ConfirmedEvent>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('添加确定场次'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: name,
-              decoration: const InputDecoration(labelText: '演出或预约名称'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('添加确定场次'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: '演出或预约名称'),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.schedule),
+                title: const Text('开始时间'),
+                subtitle: Text(_formatTime(selectedTime)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: dialogContext,
+                    initialTime: selectedTime,
+                    helpText: '选择场次时间',
+                    cancelText: '取消',
+                    confirmText: '确定',
+                  );
+                  if (picked != null) {
+                    setDialogState(() => selectedTime = picked);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
             ),
-            TextField(
-              controller: time,
-              decoration: const InputDecoration(labelText: '时间，例如 15:30'),
+            FilledButton(
+              onPressed: () {
+                if (name.text.trim().isEmpty) return;
+                Navigator.pop(
+                  dialogContext,
+                  ConfirmedEvent(
+                    name: name.text.trim(),
+                    time: _formatTime(selectedTime),
+                  ),
+                );
+              },
+              child: const Text('添加'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (name.text.trim().isEmpty ||
-                  !RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d$')
-                      .hasMatch(time.text.trim())) {
-                return;
-              }
-              Navigator.pop(
-                context,
-                ConfirmedEvent(name: name.text.trim(), time: time.text.trim()),
-              );
-            },
-            child: const Text('添加'),
-          ),
-        ],
       ),
     );
     name.dispose();
-    time.dispose();
     if (value != null) setState(() => events.add(value));
   }
 
@@ -934,6 +1149,9 @@ class _TripBuilderPageState extends State<TripBuilderPage> {
           date: date,
           arrival: arrival,
           departure: departure,
+          onPickDate: _pickDate,
+          onPickArrival: () => _pickTime(arrival, '选择到达时间'),
+          onPickDeparture: () => _pickTime(departure, '选择离开时间'),
           onNext: () => setState(() => step = 1),
         ),
         1 => _ConstraintsStep(
@@ -966,12 +1184,18 @@ class _BasicsStep extends StatelessWidget {
     required this.date,
     required this.arrival,
     required this.departure,
+    required this.onPickDate,
+    required this.onPickArrival,
+    required this.onPickDeparture,
     required this.onNext,
   });
   final TextEditingController destination;
   final TextEditingController date;
   final TextEditingController arrival;
   final TextEditingController departure;
+  final VoidCallback onPickDate;
+  final VoidCallback onPickArrival;
+  final VoidCallback onPickDeparture;
   final VoidCallback onNext;
 
   @override
@@ -999,10 +1223,12 @@ class _BasicsStep extends StatelessWidget {
       const SizedBox(height: 14),
       TextField(
         controller: date,
-        keyboardType: TextInputType.datetime,
+        readOnly: true,
+        onTap: onPickDate,
         decoration: const InputDecoration(
           labelText: '游玩日期',
-          hintText: 'YYYY-MM-DD',
+          prefixIcon: Icon(Icons.calendar_month_outlined),
+          suffixIcon: Icon(Icons.chevron_right),
           border: OutlineInputBorder(),
         ),
       ),
@@ -1012,10 +1238,12 @@ class _BasicsStep extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: arrival,
-              keyboardType: TextInputType.datetime,
+              readOnly: true,
+              onTap: onPickArrival,
               decoration: const InputDecoration(
                 labelText: '到达',
-                hintText: '10:00',
+                prefixIcon: Icon(Icons.login),
+                suffixIcon: Icon(Icons.schedule),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -1024,10 +1252,12 @@ class _BasicsStep extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: departure,
-              keyboardType: TextInputType.datetime,
+              readOnly: true,
+              onTap: onPickDeparture,
               decoration: const InputDecoration(
                 labelText: '离开',
-                hintText: '19:00',
+                prefixIcon: Icon(Icons.logout),
+                suffixIcon: Icon(Icons.schedule),
                 border: OutlineInputBorder(),
               ),
             ),

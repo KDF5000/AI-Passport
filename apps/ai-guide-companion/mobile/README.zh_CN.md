@@ -25,6 +25,11 @@ flutter run -d <device-id> --profile
 如果 iPhone 安装后需要从主屏幕独立启动，应使用 Profile 或 Release 模式。
 iOS 14 及以上的 Debug 包必须保持 Flutter/Xcode 开发会话连接。
 
+iOS 锁屏前需要先打开应用并连接 Passport。应用已启用 BLE Central 状态恢复，
+并为每轮 Passport 语音提问申请有时限的后台任务，因此锁屏时可以继续中转，但
+不能保证无限后台运行：处理过久仍可能被 iOS 挂起，网络或 VPN 中断会影响在线
+请求；从多任务界面强制划掉应用后，需要重新打开并连接。
+
 ## 运行配置
 
 打开“设置”并填写：

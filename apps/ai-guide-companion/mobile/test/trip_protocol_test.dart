@@ -6,6 +6,11 @@ import 'package:guide_companion/protocol/trip_protocol.dart';
 import 'package:guide_companion/trip/trip_plan.dart';
 
 void main() {
+  test('keeps playback request and cancellation packet IDs stable', () {
+    expect(GuidePacketType.tripPlayRequest, 0x32);
+    expect(GuidePacketType.tripPlayCancel, 0x33);
+  });
+
   test('encodes route boundary and selected stop', () {
     final value = TripProtocol.begin(TripPlan.demo);
 

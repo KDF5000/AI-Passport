@@ -19,9 +19,61 @@ final class GuideBleSession {
   StreamSubscription<List<int>>? _notify;
   StreamSubscription<BluetoothConnectionState>? _connection;
   Future<void> _writeTail = Future.value();
+  Future<void>? _initializing;
+
+  Future<void> initialize() =>
+      _initializing ??= FlutterBluePlus.setOptions(restoreState: true);
+
+  Future<bool> restoreConnection() async {
+    await initialize();
+    if (_rx != null && _device?.isConnected == true) return true;
+    await _waitForAdapter();
+    onState(GuideConnectionState.connecting, 'Restoring Passport connection');
+    final device = await _findSystemDevice(
+      attempts: 8,
+      interval: const Duration(milliseconds: 250),
+    );
+    if (device == null) {
+      onState(GuideConnectionState.disconnected, 'Passport not connected');
+      return false;
+    }
+    try {
+      await _clearConnection(disconnectDevice: false);
+      await _attach(device, connectFirst: !device.isConnected, restored: true);
+      return true;
+    } catch (_) {
+      await _clearConnection(disconnectDevice: false);
+      rethrow;
+    }
+  }
 
   Future<void> connect() async {
-    await disconnect();
+    await initialize();
+    await _waitForAdapter();
+    if (_rx != null && _device?.isConnected == true) {
+      onState(
+        GuideConnectionState.connected,
+        'Connected · MTU ${_device!.mtuNow}',
+      );
+      return;
+    }
+
+    onState(GuideConnectionState.connecting, 'Checking existing connection');
+    final existing = await _findSystemDevice(
+      attempts: 3,
+      interval: const Duration(milliseconds: 200),
+    );
+    if (existing != null) {
+      await _clearConnection(disconnectDevice: false);
+      await _attach(
+        existing,
+        connectFirst: !existing.isConnected,
+        restored: true,
+      );
+      return;
+    }
+
+    await _clearConnection(disconnectDevice: true);
     onState(GuideConnectionState.scanning, 'Looking for Passport Guide');
     final found = Completer<BluetoothDevice>();
     _scan = FlutterBluePlus.onScanResults.listen((results) {
@@ -49,7 +101,43 @@ final class GuideBleSession {
     }
 
     onState(GuideConnectionState.connecting, 'Connecting');
-    await device.connect(license: License.nonprofit, mtu: 185);
+    await _attach(device, connectFirst: true);
+  }
+
+  Future<void> _waitForAdapter() async {
+    if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) return;
+    await FlutterBluePlus.adapterState
+        .where((state) => state == BluetoothAdapterState.on)
+        .first
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw StateError('Bluetooth is not ready'),
+        );
+  }
+
+  Future<BluetoothDevice?> _findSystemDevice({
+    required int attempts,
+    required Duration interval,
+  }) async {
+    for (var attempt = 0; attempt < attempts; attempt += 1) {
+      final devices = await FlutterBluePlus.systemDevices([
+        Guid(GuideBleIds.service),
+      ]);
+      if (devices.isNotEmpty) return devices.first;
+
+      if (attempt + 1 < attempts) await Future<void>.delayed(interval);
+    }
+    return null;
+  }
+
+  Future<void> _attach(
+    BluetoothDevice device, {
+    required bool connectFirst,
+    bool restored = false,
+  }) async {
+    if (connectFirst) {
+      await device.connect(license: License.nonprofit, mtu: 185);
+    }
     _device = device;
     _connection = device.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
@@ -85,7 +173,10 @@ final class GuideBleSession {
     if (mtu < 168) {
       throw StateError('BLE MTU $mtu is too small; reconnect and retry');
     }
-    onState(GuideConnectionState.connected, 'Connected · MTU $mtu');
+    onState(
+      GuideConnectionState.connected,
+      '${restored ? "Restored" : "Connected"} · MTU $mtu',
+    );
   }
 
   Future<void> send(int type, [List<int> payload = const []]) async {
@@ -138,6 +229,11 @@ final class GuideBleSession {
   }
 
   Future<void> disconnect() async {
+    await _clearConnection(disconnectDevice: true);
+    onState(GuideConnectionState.disconnected, 'Not connected');
+  }
+
+  Future<void> _clearConnection({required bool disconnectDevice}) async {
     await _notify?.cancel();
     await _connection?.cancel();
     await _scan?.cancel();
@@ -147,7 +243,8 @@ final class GuideBleSession {
     _rx = null;
     final device = _device;
     _device = null;
-    if (device != null && device.isConnected) await device.disconnect();
-    onState(GuideConnectionState.disconnected, 'Not connected');
+    if (disconnectDevice && device != null && device.isConnected) {
+      await device.disconnect();
+    }
   }
 }

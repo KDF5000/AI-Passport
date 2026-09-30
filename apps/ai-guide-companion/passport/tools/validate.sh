@@ -35,6 +35,10 @@ run_static_checks() {
         -o "${test_dir}/test_guide_adpcm"
     "${test_dir}/test_guide_adpcm"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_guide_playback_state.c \
+        -o "${test_dir}/test_guide_playback_state"
+    "${test_dir}/test_guide_playback_state"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_guide_utf8.c \
         -o "${test_dir}/test_guide_utf8"
     "${test_dir}/test_guide_utf8"

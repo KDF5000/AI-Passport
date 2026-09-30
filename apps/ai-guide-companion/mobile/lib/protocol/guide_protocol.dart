@@ -16,6 +16,7 @@ abstract final class GuidePacketType {
   static const tripSelect = 0x30;
   static const tripCompletion = 0x31;
   static const tripPlayRequest = 0x32;
+  static const tripPlayCancel = 0x33;
   static const error = 0x7f;
 }
 
