@@ -2,48 +2,72 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final class AiSettings {
+  static const defaultArkModel = '';
+  static const defaultSailVoice = 'zh_female_qingxin';
+
   const AiSettings({
-    this.baseUrl = '',
-    this.sttPath = '/v1/audio/transcriptions',
-    this.chatPath = '/v1/chat/completions',
-    this.ttsPath = '/v1/audio/speech',
-    this.chatModel = '',
-    this.sttModel = 'whisper-1',
-    this.ttsModel = '',
-    this.voice = 'alloy',
-    this.apiKey = '',
+    this.arkBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3',
+    this.arkChatPath = '/chat/completions',
+    this.arkModel = defaultArkModel,
+    this.arkApiKey = '',
+    this.speechAppId = '',
+    this.speechAccessKey = '',
+    this.speechSecretKey = '',
+    this.speechToken = '',
+    this.asrEndpoint =
+        'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async',
+    this.asrResourceId = 'asr.streaming.model.big',
+    this.asrCluster = '',
+    this.ttsEndpoint = 'wss://openspeech.bytedance.com/api/v1/tts/ws_binary',
+    this.ttsCluster = 'volcano_tts',
+    this.ttsVoice = defaultSailVoice,
   });
 
-  final String baseUrl;
-  final String sttPath;
-  final String chatPath;
-  final String ttsPath;
-  final String chatModel;
-  final String sttModel;
-  final String ttsModel;
-  final String voice;
-  final String apiKey;
+  final String arkBaseUrl;
+  final String arkChatPath;
+  final String arkModel;
+  final String arkApiKey;
+  final String speechAppId;
+  final String speechAccessKey;
+  final String speechSecretKey;
+  final String speechToken;
+  final String asrEndpoint;
+  final String asrResourceId;
+  final String asrCluster;
+  final String ttsEndpoint;
+  final String ttsCluster;
+  final String ttsVoice;
 
   AiSettings copyWith({
-    String? baseUrl,
-    String? sttPath,
-    String? chatPath,
-    String? ttsPath,
-    String? chatModel,
-    String? sttModel,
-    String? ttsModel,
-    String? voice,
-    String? apiKey,
+    String? arkBaseUrl,
+    String? arkChatPath,
+    String? arkModel,
+    String? arkApiKey,
+    String? speechAppId,
+    String? speechAccessKey,
+    String? speechSecretKey,
+    String? speechToken,
+    String? asrEndpoint,
+    String? asrResourceId,
+    String? asrCluster,
+    String? ttsEndpoint,
+    String? ttsCluster,
+    String? ttsVoice,
   }) => AiSettings(
-    baseUrl: baseUrl ?? this.baseUrl,
-    sttPath: sttPath ?? this.sttPath,
-    chatPath: chatPath ?? this.chatPath,
-    ttsPath: ttsPath ?? this.ttsPath,
-    chatModel: chatModel ?? this.chatModel,
-    sttModel: sttModel ?? this.sttModel,
-    ttsModel: ttsModel ?? this.ttsModel,
-    voice: voice ?? this.voice,
-    apiKey: apiKey ?? this.apiKey,
+    arkBaseUrl: arkBaseUrl ?? this.arkBaseUrl,
+    arkChatPath: arkChatPath ?? this.arkChatPath,
+    arkModel: arkModel ?? this.arkModel,
+    arkApiKey: arkApiKey ?? this.arkApiKey,
+    speechAppId: speechAppId ?? this.speechAppId,
+    speechAccessKey: speechAccessKey ?? this.speechAccessKey,
+    speechSecretKey: speechSecretKey ?? this.speechSecretKey,
+    speechToken: speechToken ?? this.speechToken,
+    asrEndpoint: asrEndpoint ?? this.asrEndpoint,
+    asrResourceId: asrResourceId ?? this.asrResourceId,
+    asrCluster: asrCluster ?? this.asrCluster,
+    ttsEndpoint: ttsEndpoint ?? this.ttsEndpoint,
+    ttsCluster: ttsCluster ?? this.ttsCluster,
+    ttsVoice: ttsVoice ?? this.ttsVoice,
   );
 }
 
@@ -52,31 +76,56 @@ final class AiSettingsStore {
 
   Future<AiSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
+    final secrets = await Future.wait<String?>([
+      _secret.read(key: 'arkApiKey'),
+      _secret.read(key: 'speechAccessKey'),
+      _secret.read(key: 'speechSecretKey'),
+      _secret.read(key: 'speechToken'),
+    ]);
     return AiSettings(
-      baseUrl: prefs.getString('baseUrl') ?? '',
-      sttPath: prefs.getString('sttPath') ?? '/v1/audio/transcriptions',
-      chatPath: prefs.getString('chatPath') ?? '/v1/chat/completions',
-      ttsPath: prefs.getString('ttsPath') ?? '/v1/audio/speech',
-      chatModel: prefs.getString('chatModel') ?? '',
-      sttModel: prefs.getString('sttModel') ?? 'whisper-1',
-      ttsModel: prefs.getString('ttsModel') ?? '',
-      voice: prefs.getString('voice') ?? 'alloy',
-      apiKey: await _secret.read(key: 'apiKey') ?? '',
+      arkBaseUrl:
+          prefs.getString('arkBaseUrl') ??
+          'https://ark.cn-beijing.volces.com/api/v3',
+      arkChatPath: prefs.getString('arkChatPath') ?? '/chat/completions',
+      arkModel: prefs.getString('arkModel') ?? AiSettings.defaultArkModel,
+      arkApiKey: secrets[0] ?? '',
+      speechAppId: prefs.getString('speechAppId') ?? '',
+      speechAccessKey: secrets[1] ?? '',
+      speechSecretKey: secrets[2] ?? '',
+      speechToken: secrets[3] ?? '',
+      asrEndpoint:
+          prefs.getString('asrEndpoint') ??
+          'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async',
+      asrResourceId:
+          prefs.getString('asrResourceId') ?? 'asr.streaming.model.big',
+      asrCluster: prefs.getString('asrCluster') ?? '',
+      ttsEndpoint:
+          prefs.getString('ttsEndpoint') ??
+          'wss://openspeech.bytedance.com/api/v1/tts/ws_binary',
+      ttsCluster: prefs.getString('ttsCluster') ?? 'volcano_tts',
+      ttsVoice: prefs.getString('ttsVoice') == 'BV700_V2_streaming'
+          ? AiSettings.defaultSailVoice
+          : prefs.getString('ttsVoice') ?? AiSettings.defaultSailVoice,
     );
   }
 
   Future<void> save(AiSettings value) async {
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
-      prefs.setString('baseUrl', value.baseUrl),
-      prefs.setString('sttPath', value.sttPath),
-      prefs.setString('chatPath', value.chatPath),
-      prefs.setString('ttsPath', value.ttsPath),
-      prefs.setString('chatModel', value.chatModel),
-      prefs.setString('sttModel', value.sttModel),
-      prefs.setString('ttsModel', value.ttsModel),
-      prefs.setString('voice', value.voice),
-      _secret.write(key: 'apiKey', value: value.apiKey),
+      prefs.setString('arkBaseUrl', value.arkBaseUrl),
+      prefs.setString('arkChatPath', value.arkChatPath),
+      prefs.setString('arkModel', value.arkModel),
+      prefs.setString('speechAppId', value.speechAppId),
+      prefs.setString('asrEndpoint', value.asrEndpoint),
+      prefs.setString('asrResourceId', value.asrResourceId),
+      prefs.setString('asrCluster', value.asrCluster),
+      prefs.setString('ttsEndpoint', value.ttsEndpoint),
+      prefs.setString('ttsCluster', value.ttsCluster),
+      prefs.setString('ttsVoice', value.ttsVoice),
+      _secret.write(key: 'arkApiKey', value: value.arkApiKey),
+      _secret.write(key: 'speechAccessKey', value: value.speechAccessKey),
+      _secret.write(key: 'speechSecretKey', value: value.speechSecretKey),
+      _secret.write(key: 'speechToken', value: value.speechToken),
     ]);
   }
 }

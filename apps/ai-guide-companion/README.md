@@ -1,48 +1,195 @@
 <p align="right"><a href="README.zh_CN.md">简体中文</a> · <strong>English</strong></p>
 
-# AI Guide Companion MVP
+# AI Guide Companion
 
-This application validates one complete voice turn between AI Passport and a
-phone. Hold OK on Passport to record, release to send compressed audio over
-BLE, let the phone call configurable speech/LLM services through its own
-network or VPN, then read and hear the response on Passport.
+AI Guide Companion is an offline-first travel assistant made of an iOS/Android
+phone app and FoloToy AI Passport firmware. The phone plans and stores a trip,
+uses AI only when explicitly requested, and handles network access. Passport is
+the low-distraction route display, microphone, and speaker.
 
-The project is intentionally split into:
+The current implementation supports:
 
-- `passport/`: ESP-IDF firmware and host tests;
-- `mobile/`: Flutter app targeting iOS first and Android with the same code;
-- `protocol/`: versioned BLE packet contract.
+- AI-generated itineraries for a destination, date, visit window, pace, and
+  party profile;
+- user-confirmed performances and reservations as immutable scheduling
+  constraints;
+- a review step before an AI draft becomes the saved trip;
+- per-stop summaries, spoken guide scripts, field tips, assumptions, and
+  information that must be verified before departure;
+- locally persisted itinerary and completion progress;
+- optional pre-generated audio cached on the phone for offline playback;
+- contextual AI questions from either the phone or Passport;
+- BLE route synchronization, voice input, streamed answer text, and audio
+  playback on Passport.
 
-Route planning, destination data, maps, location, and user accounts are outside
-this MVP.
+This is not a live map or ticketing service. AI-generated schedules are
+planning suggestions. Opening hours, admission rules, performance times, and
+temporary notices must still be checked against the venue's official source.
 
-## Quick start
+## Repository layout
 
-1. Build and flash the firmware in `passport/`, then run `mobile/` on iOS or
-   Android.
-2. Configure an OpenAI-compatible base URL, STT/chat/TTS paths, model names,
-   and API key in the phone settings. The key is stored in platform secure
-   storage.
-3. Tap **Scan and connect** and select the device advertised as
-   `Passport Guide`.
-4. When Passport shows Ready, hold OK to speak and release to send. Transcript
-   and answer appear on both screens, and Passport plays the answer. Press OK
-   during playback to stop it.
+- `mobile/`: Flutter app, developed and device-tested on iPhone; the codebase
+  also targets Android.
+- `passport/`: ESP-IDF firmware for FoloToy AI Passport.
+- `protocol/`: versioned BLE packet contract shared by both sides.
 
-The phone uses its own network, including an already working iPhone VPN. The
-current TTS endpoint must return 16 kHz, 16-bit, mono PCM WAV. Keep the app in
-the foreground; background BLE is intentionally outside this MVP.
+## How a trip is created
+
+1. Enter the destination, date, arrival/departure time, pace, and party needs.
+2. Add only performances, tickets, or reservations that the user has already
+   confirmed. Their names and times become hard constraints.
+3. The phone makes one structured AI request to create candidate stops, a
+   chronological route, short Passport summaries, full guide scripts, and
+   verification items.
+4. Review the draft. Non-fixed stops can be reordered or removed; confirmed
+   events cannot be silently changed by AI.
+5. Save the trip locally, optionally prepare offline audio, then connect and
+   sync it to Passport.
+
+Route generation may take longer than an ordinary chat response because it
+returns all guide scripts in one structured result. The progress page displays
+elapsed time and allows cancellation without clearing the form.
+
+## Required services and access
+
+Two independent service groups are used. Credentials must belong to the same
+environment and region as the endpoints being called.
+
+### 1. Volcengine Ark: itinerary generation and questions
+
+Apply for or prepare:
+
+1. A Volcengine account with Ark access in the **CN production region**.
+2. A chat-capable model deployment/inference endpoint that supports the
+   Chat Completions API, JSON-object responses, and streaming.
+3. An Ark API key authorized to call that endpoint.
+4. Sufficient output-token and request-time quotas. Itinerary generation can
+   return several thousand tokens.
+
+In the phone app, open **Settings** and enter:
+
+- **Ark model / Endpoint**: the endpoint ID shown by Ark, commonly beginning
+  with `ep-`;
+- **Ark API Key**: the corresponding API key.
+
+The app currently calls the CN Ark base URL
+`https://ark.cn-beijing.volces.com/api/v3` and `/chat/completions`. If a private
+proxy is used, the phone must already be able to reach it, for example through
+an active VPN. Never put a proxy credential in this repository.
+
+### 2. ByteDance Speech/SAIL: speech recognition and synthesis
+
+Ask the Speech/SAIL service owner to create or authorize one application in the
+**CN production environment** with all of the following:
+
+- an application-level **AppKey**;
+- an application-scoped **Access Key (AK)** and **Secret Key (SK)**;
+- streaming large-model ASR access, using resource
+  `asr.streaming.model.big` (or the authorized two-pass variant);
+- SAIL/SAMI TTS access for the selected Chinese voice;
+- request-rate quota appropriate for conversational TTS. The app serializes
+  synthesis requests and retries one rate-limit response, but cannot bypass the
+  service quota.
+
+Enter the resulting **Speech AppKey**, **Speech AK**, and **Speech SK** in the
+phone settings. The CN endpoints, resource IDs, and default voice are already
+configured in the app.
+
+`UserNotFound` / `40200141` normally means the AppKey or credentials belong to
+a different environment or region, such as BOE credentials being sent to the
+CN production endpoint. Confirm the region and application binding instead of
+rotating keys blindly.
+
+The Ark key and Speech AK/SK are different credentials and are not
+interchangeable. Do not commit either set. The phone stores secrets through the
+platform secure-storage API and never sends them to Passport.
+
+## Build and run
+
+### Phone
+
+```bash
+cd mobile
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d <device-id> --profile
+```
+
+Use profile or release mode for an iPhone build that can be opened later from
+the Home Screen. An iOS debug build can only launch while attached to Flutter
+tooling or Xcode.
+
+### Passport
+
+Use ESP-IDF 5.5.3:
+
+```bash
+cd passport
+source <path-to-esp-idf-v5.5.3>/export.sh
+./tools/validate.sh
+idf.py -p <serial-port> flash monitor
+```
+
+Flashing is a hardware write. Confirm the target port and intended image before
+running it.
+
+## Use
+
+1. Configure both service groups in phone settings.
+2. Create, review, and save a trip. Route browsing and progress are immediately
+   local; guide audio is not synthesized automatically.
+3. In **Offline pack**, explicitly cache missing guide audio while connectivity
+   is reliable. The same stop text and voice reuse the cached file.
+4. Power on Passport, connect to `Passport Guide`, and sync the route.
+5. On Passport, use UP/DOWN to change stops, OK to play a cached guide,
+   double-press OK to toggle completion, and hold OK to record a question.
+   During playback, UP/DOWN changes volume and OK stops.
+
+If Passport is disconnected, cached guides can still play through the phone.
+The app currently needs to remain in the foreground for BLE relay behavior.
+
+## Network and cost boundaries
+
+No network request is made when browsing a saved route, changing stops,
+recording completion, replaying cached audio, or resuming the app. Network is
+used only when the user:
+
+- generates a new itinerary;
+- explicitly asks AI;
+- explicitly prepares missing offline guide audio.
+
+This boundary reduces service usage and keeps the core trip usable under weak
+network conditions.
 
 ## Validation
+
+Phone checks:
 
 ```bash
 cd mobile
 flutter analyze
 flutter test
+```
 
-cd ../passport
+Firmware checks:
+
+```bash
+cd passport
 source <path-to-esp-idf-v5.5.3>/export.sh
 ./tools/validate.sh
 ```
 
-Never commit API keys, personal proxy URLs, or unsanitized logs.
+Live Speech integration tests are opt-in and read credentials only from
+environment variables:
+
+```bash
+RUN_SAIL_LIVE=1 \
+SAIL_APP=<appkey> \
+SAIL_AK=<access-key> \
+SAIL_SK=<secret-key> \
+flutter test test/sail_live_integration_test.dart
+```
+
+Never commit API keys, AK/SK pairs, private proxy URLs, device secrets, or
+unsanitized logs.

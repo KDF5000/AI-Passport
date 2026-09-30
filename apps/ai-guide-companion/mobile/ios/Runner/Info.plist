@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Connect to AI Passport to relay voice questions and answers.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Record your travel questions for speech recognition and AI replies.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

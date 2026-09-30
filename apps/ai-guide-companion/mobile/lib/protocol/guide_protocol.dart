@@ -9,6 +9,13 @@ abstract final class GuidePacketType {
   static const playbackStart = 0x12;
   static const playbackAudio = 0x13;
   static const responseEnd = 0x14;
+  static const tripBegin = 0x20;
+  static const tripTitle = 0x21;
+  static const tripStop = 0x22;
+  static const tripCommit = 0x23;
+  static const tripSelect = 0x30;
+  static const tripCompletion = 0x31;
+  static const tripPlayRequest = 0x32;
   static const error = 0x7f;
 }
 

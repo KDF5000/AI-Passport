@@ -18,6 +18,7 @@ final class GuideBleSession {
   StreamSubscription<List<ScanResult>>? _scan;
   StreamSubscription<List<int>>? _notify;
   StreamSubscription<BluetoothConnectionState>? _connection;
+  Future<void> _writeTail = Future.value();
 
   Future<void> connect() async {
     await disconnect();
@@ -88,23 +89,52 @@ final class GuideBleSession {
   }
 
   Future<void> send(int type, [List<int> payload = const []]) async {
-    final rx = _rx;
-    if (rx == null) throw StateError('Passport is not connected');
+    return _send(type, payload, withoutResponse: false);
+  }
+
+  Future<void> sendAudio(List<int> payload) async {
+    return _send(GuidePacketType.playbackAudio, payload, withoutResponse: true);
+  }
+
+  Future<void> _send(
+    int type,
+    List<int> payload, {
+    required bool withoutResponse,
+  }) async {
     final value = packet(type, payload);
-    final maxPayload = (_device?.mtuNow ?? 23) - 3;
-    if (value.length > maxPayload) {
-      throw StateError('BLE packet exceeds negotiated MTU');
-    }
-    await rx.write(value, withoutResponse: false);
+    final result = Completer<void>();
+    _writeTail = _writeTail.then((_) async {
+      try {
+        final rx = _rx;
+        if (rx == null) throw StateError('Passport is not connected');
+        if (withoutResponse && !rx.properties.writeWithoutResponse) {
+          throw StateError('Passport does not support streaming BLE writes');
+        }
+        final maxPayload = (_device?.mtuNow ?? 23) - 3;
+        if (value.length > maxPayload) {
+          throw StateError('BLE packet exceeds negotiated MTU');
+        }
+        await rx.write(value, withoutResponse: withoutResponse);
+        result.complete();
+      } catch (error, stack) {
+        result.completeError(error, stack);
+      }
+    });
+    return result.future;
   }
 
   Future<void> sendText(int type, String text) async {
-    final bytes = utf8.encode(text);
     final chunkSize = ((_device?.mtuNow ?? 23) - 4).clamp(1, 180);
-    for (var offset = 0; offset < bytes.length; offset += chunkSize) {
-      final end = (offset + chunkSize).clamp(0, bytes.length);
-      await send(type, bytes.sublist(offset, end));
+    var chunk = <int>[];
+    for (final rune in text.runes) {
+      final encoded = utf8.encode(String.fromCharCode(rune));
+      if (chunk.isNotEmpty && chunk.length + encoded.length > chunkSize) {
+        await send(type, chunk);
+        chunk = <int>[];
+      }
+      chunk.addAll(encoded);
     }
+    if (chunk.isNotEmpty) await send(type, chunk);
   }
 
   Future<void> disconnect() async {

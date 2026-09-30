@@ -1,36 +1,60 @@
-<p align="right">
-  <a href="README.zh_CN.md">简体中文</a> · <strong>English</strong>
-</p>
+<p align="right"><a href="README.zh_CN.md">简体中文</a> · <strong>English</strong></p>
 
 # AI Guide Companion Mobile App
 
-This Flutter app is the network and AI bridge for the Passport AI Guide MVP.
-It receives speech from the Passport over Bluetooth Low Energy, calls
-OpenAI-compatible speech-to-text, chat, and text-to-speech endpoints through
-the phone's network connection, then returns the answer text and audio to the
-Passport.
+This Flutter app owns itinerary generation, trip persistence, offline guide
+audio, AI conversations, and the BLE session with FoloToy AI Passport. The
+phone provides the network path; API credentials never leave the phone.
 
-## Run
+See the [application README](../README.md) for the complete product flow,
+service-access checklist, credential fields, Passport controls, and offline
+policy.
 
-1. Install Flutter and prepare an iOS or Android development device.
-2. Run `flutter pub get` in this directory.
-3. Start the app with `flutter run`.
-4. Enter the base URL, endpoint paths, model names, voice, and API key for your
-   provider. The API key is stored with the platform's secure storage.
-5. Power on the Passport firmware, tap **Connect**, and select
-   `Passport Guide`.
-
-Keep the app in the foreground during this MVP. The phone may use its normal
-mobile data, Wi-Fi, or VPN route; the Passport itself never receives the API
-key.
-
-## Checks
+## Development
 
 ```bash
+flutter pub get
 flutter analyze
 flutter test
+flutter devices
+flutter run -d <device-id> --profile
 ```
 
-The MVP expects the TTS endpoint to return 16 kHz, 16-bit, mono PCM WAV audio.
-See the parent application README and the protocol documentation for complete
-limitations and message formats.
+The app has been exercised on iPhone. Android uses the same Flutter code but
+still requires platform-specific acceptance testing.
+
+Use profile or release mode when an iPhone build must launch independently
+from the Home Screen. Debug builds require an active Flutter/Xcode development
+session on iOS 14 and later.
+
+## Runtime configuration
+
+Open **Settings** and provide:
+
+- Ark model/endpoint ID and Ark API key for route generation and questions;
+- Speech AppKey, AK, and SK for streaming ASR and SAIL/SAMI TTS.
+
+The CN endpoints and default Speech resource identifiers are built in. Obtain
+all credentials from the corresponding service owner and keep the application,
+credentials, and endpoint region aligned. Secrets are stored with
+`flutter_secure_storage`; non-secret preferences use shared preferences.
+
+The app expects synthesized audio that can be decoded as 16 kHz, 16-bit, mono
+PCM/WAV before it is converted to the Passport streaming format.
+
+## Optional live Speech tests
+
+Normal tests never require real credentials. To exercise the authorized SAIL
+application explicitly:
+
+```bash
+RUN_SAIL_LIVE=1 \
+SAIL_APP=<appkey> \
+SAIL_AK=<access-key> \
+SAIL_SK=<secret-key> \
+flutter test test/sail_live_integration_test.dart
+```
+
+Pass credentials only as local environment variables. Do not add them to Dart
+source, test fixtures, shell scripts, `.env` files tracked by Git, screenshots,
+or issue logs.

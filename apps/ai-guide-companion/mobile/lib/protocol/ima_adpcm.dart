@@ -114,54 +114,7 @@ abstract final class ImaAdpcm {
   ];
 
   static Uint8List encode(Int16List pcm) {
-    if (pcm.isEmpty) return Uint8List(0);
-    final out = Uint8List(headerBytes + pcm.length ~/ 2);
-    var predictor = pcm.first;
-    var index = 0;
-    final header = ByteData.sublistView(out);
-    header.setInt16(0, predictor, Endian.little);
-    out[2] = index;
-
-    var outputIndex = headerBytes;
-    var pending = 0;
-    for (var i = 1; i < pcm.length; i++) {
-      var diff = pcm[i] - predictor;
-      var code = 0;
-      if (diff < 0) {
-        code = 8;
-        diff = -diff;
-      }
-      var step = _steps[index];
-      var delta = step >> 3;
-      if (diff >= step) {
-        code |= 4;
-        diff -= step;
-        delta += step;
-      }
-      step >>= 1;
-      if (diff >= step) {
-        code |= 2;
-        diff -= step;
-        delta += step;
-      }
-      step >>= 1;
-      if (diff >= step) {
-        code |= 1;
-        delta += step;
-      }
-      predictor = (predictor + ((code & 8) != 0 ? -delta : delta)).clamp(
-        -32768,
-        32767,
-      );
-      index = (index + _indexes[code]).clamp(0, 88);
-      if (i.isOdd) {
-        pending = code;
-      } else {
-        out[outputIndex++] = pending | (code << 4);
-      }
-    }
-    if ((pcm.length - 1).isOdd) out[outputIndex++] = pending;
-    return Uint8List.sublistView(out, 0, outputIndex);
+    return ImaAdpcmEncoder().encode(pcm);
   }
 
   static Int16List decode(Uint8List block) {
@@ -222,5 +175,61 @@ abstract final class ImaAdpcm {
       }
     }
     return out;
+  }
+}
+
+final class ImaAdpcmEncoder {
+  int _index = 0;
+
+  Uint8List encode(Int16List pcm) {
+    if (pcm.isEmpty) return Uint8List(0);
+    final out = Uint8List(ImaAdpcm.headerBytes + pcm.length ~/ 2);
+    var predictor = pcm.first;
+    var index = _index;
+    final header = ByteData.sublistView(out);
+    header.setInt16(0, predictor, Endian.little);
+    out[2] = index;
+
+    var outputIndex = ImaAdpcm.headerBytes;
+    var pending = 0;
+    for (var i = 1; i < pcm.length; i++) {
+      var diff = pcm[i] - predictor;
+      var code = 0;
+      if (diff < 0) {
+        code = 8;
+        diff = -diff;
+      }
+      var step = ImaAdpcm._steps[index];
+      var delta = step >> 3;
+      if (diff >= step) {
+        code |= 4;
+        diff -= step;
+        delta += step;
+      }
+      step >>= 1;
+      if (diff >= step) {
+        code |= 2;
+        diff -= step;
+        delta += step;
+      }
+      step >>= 1;
+      if (diff >= step) {
+        code |= 1;
+        delta += step;
+      }
+      predictor = (predictor + ((code & 8) != 0 ? -delta : delta)).clamp(
+        -32768,
+        32767,
+      );
+      index = (index + ImaAdpcm._indexes[code]).clamp(0, 88);
+      if (i.isOdd) {
+        pending = code;
+      } else {
+        out[outputIndex++] = pending | (code << 4);
+      }
+    }
+    if ((pcm.length - 1).isOdd) out[outputIndex++] = pending;
+    _index = index;
+    return Uint8List.sublistView(out, 0, outputIndex);
   }
 }

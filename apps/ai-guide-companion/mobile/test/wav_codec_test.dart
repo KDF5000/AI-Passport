@@ -21,4 +21,15 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  test('accepts a streaming WAV whose data length is left open-ended', () {
+    final source = Int16List.fromList([0, 1200, -1200, 32767, -32768]);
+    final bytes = ImaAdpcm.pcm16Wave([source], 16000);
+    ByteData.sublistView(bytes).setUint32(40, 0x7fffffff, Endian.little);
+
+    final wave = WavCodec.decodeMonoPcm16(bytes);
+
+    expect(wave.sampleRate, 16000);
+    expect(wave.samples, source);
+  });
 }

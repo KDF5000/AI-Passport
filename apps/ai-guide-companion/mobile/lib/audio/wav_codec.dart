@@ -24,6 +24,15 @@ abstract final class WavCodec {
       final id = _ascii(bytes, offset, 4);
       final size = data.getUint32(offset + 4, Endian.little);
       final payload = offset + 8;
+      if (id == 'data') {
+        // Some streaming TTS services emit a WAV header before the final audio
+        // length is known and leave the data size at 0x7fffffff/0xffffffff.
+        // The response body is complete here, so its remaining bytes are the
+        // authoritative PCM length. Do not walk PCM as if it contained chunks.
+        dataOffset = payload;
+        dataLength = size.clamp(0, bytes.length - payload);
+        break;
+      }
       if (payload + size > bytes.length) {
         throw const FormatException('Truncated WAV chunk');
       }
@@ -35,9 +44,6 @@ abstract final class WavCodec {
           throw const FormatException('TTS must return mono 16-bit PCM WAV');
         }
         sampleRate = data.getUint32(payload + 4, Endian.little);
-      } else if (id == 'data') {
-        dataOffset = payload;
-        dataLength = size;
       }
       offset = payload + size + (size.isOdd ? 1 : 0);
     }

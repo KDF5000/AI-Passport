@@ -31,4 +31,21 @@ void main() {
     expect(String.fromCharCodes(wav.sublist(8, 12)), 'WAVE');
     expect(ByteData.sublistView(wav).getUint32(24, Endian.little), 16000);
   });
+
+  test('keeps the adaptive step index across consecutive playback blocks', () {
+    final encoder = ImaAdpcmEncoder();
+    final loud = Int16List.fromList(
+      List.generate(320, (i) => i.isEven ? 28000 : -28000),
+    );
+    final next = Int16List.fromList(
+      List.generate(320, (i) => i.isEven ? 24000 : -24000),
+    );
+
+    final first = encoder.encode(loud);
+    final second = encoder.encode(next);
+
+    expect(first[2], 0);
+    expect(second[2], greaterThan(0));
+    expect(ImaAdpcm.decode(second).first, next.first);
+  });
 }

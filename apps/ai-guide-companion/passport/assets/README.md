@@ -16,6 +16,9 @@ Store reusable font files and generated font sources in `fonts/`.
 - Document the source, license, character range, conversion command, and expected destination.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.
 - Do not commit fonts whose license does not permit redistribution.
+- [`fonts/README.md`](fonts/README.md) records the Source Han Sans CN font used
+  for dynamic guide answers, its license, coverage, checksums, and reproducible
+  LVGL conversion command.
 
 ## Images
 
