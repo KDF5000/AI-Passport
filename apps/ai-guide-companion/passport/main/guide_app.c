@@ -1,6 +1,7 @@
 #include "guide_app.h"
 
 #include "bsp_audio.h"
+#include "bsp_battery.h"
 #include "bsp_display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -9,6 +10,7 @@
 #include "freertos/task.h"
 #include "guide_adpcm.h"
 #include "guide_ble.h"
+#include "guide_idle_state.h"
 #include "guide_playback_state.h"
 #include "guide_utf8.h"
 #include "lvgl.h"
@@ -35,6 +37,9 @@ LV_FONT_DECLARE(guide_font_14);
 #define STOP_TIME_CAPACITY 12
 #define STOP_SUMMARY_CAPACITY 192
 #define OK_CLICK_SUPPRESS_MS 1000
+#define DISPLAY_IDLE_TIMEOUT_MS 30000
+#define IDLE_CHECK_INTERVAL_MS 250
+#define BATTERY_REFRESH_MS 60000
 
 static const char *TAG = "guide_app";
 
@@ -78,7 +83,9 @@ typedef struct {
 } audio_command_t;
 
 typedef enum {
-    APP_HOLD_OK = 1,
+    APP_BUTTON = 1,
+    APP_ACTIVITY,
+    APP_HOLD_OK,
     APP_RELEASE_OK,
     APP_STOP_AUDIO,
     APP_VOLUME_UP,
@@ -95,6 +102,8 @@ typedef struct {
     bool connected;
     bool ready;
     uint16_t mtu;
+    bsp_btn_t button;
+    bsp_btn_ev_t button_event;
 } app_event_t;
 
 typedef struct {
@@ -124,9 +133,12 @@ static bool s_playback_primed;
 static bool s_playback_started;
 static volatile bool s_playback_ending;
 static volatile bool s_playback_stop_requested;
+static bool s_playback_cancelled;
 static uint8_t s_volume_percent = VOLUME_DEFAULT;
 static lv_obj_t *s_route_view;
 static lv_obj_t *s_qa_view;
+static lv_obj_t *s_route_battery;
+static lv_obj_t *s_route_battery_icon;
 static lv_obj_t *s_route_title;
 static lv_obj_t *s_route_index;
 static lv_obj_t *s_route_stage;
@@ -148,10 +160,8 @@ static bool s_receiving_answer;
 static trip_plan_t s_trip;
 static trip_plan_t s_trip_staging;
 static int64_t s_suppress_ok_click_until_us;
-
-static void set_ui(const char *title, const char *status, uint32_t color);
-static void set_text(const char *text);
-static esp_err_t notify_retry(const uint8_t *data, size_t length);
+static bool s_waiting_response;
+static guide_idle_state_t s_idle;
 
 #define COLOR_PAPER 0x151a18
 #define COLOR_TICKET 0xe9eee9
@@ -161,6 +171,86 @@ static esp_err_t notify_retry(const uint8_t *data, size_t length);
 #define COLOR_RULE 0xaab7b0
 #define COLOR_HEADER 0xc7d3cc
 #define COLOR_ERROR 0xffa08c
+
+static void set_ui(const char *title, const char *status, uint32_t color);
+static void set_text(const char *text);
+static esp_err_t notify_retry(const uint8_t *data, size_t length);
+
+static uint8_t completed_stop_count(void)
+{
+    uint8_t completed = 0;
+    for (uint8_t i = 0; i < s_trip.count; ++i) {
+        if (s_trip.stops[i].completed) completed++;
+    }
+    return completed;
+}
+
+static void post_activity(void)
+{
+    if (!s_event_queue) return;
+    app_event_t activity = {.type = APP_ACTIVITY};
+    (void)xQueueSend(s_event_queue, &activity, 0);
+}
+
+static uint32_t uptime_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static bool interaction_active(void)
+{
+    return s_recording || s_playing || s_waiting_response ||
+           s_receiving_answer;
+}
+
+static esp_err_t set_display_awake(bool awake)
+{
+    if (!bsp_lvgl_lock(300)) return ESP_ERR_TIMEOUT;
+    esp_err_t result = bsp_display_set_awake(awake);
+    bsp_lvgl_unlock();
+    return result;
+}
+
+static void set_battery_text(int soc)
+{
+    char value[12];
+    uint32_t icon_color = COLOR_MUTED;
+    uint32_t text_color = COLOR_HEADER;
+    if (soc >= 0 && soc <= 100) {
+        snprintf(value, sizeof(value), "%d%%", soc);
+        icon_color = soc < 20 ? COLOR_ERROR : COLOR_ACCENT;
+        if (soc < 20) text_color = COLOR_ERROR;
+    } else {
+        snprintf(value, sizeof(value), "--%%");
+    }
+    if (!bsp_lvgl_lock(300)) return;
+    if (s_route_battery) {
+        lv_label_set_text(s_route_battery, value);
+        lv_obj_set_style_text_color(
+            s_route_battery, lv_color_hex(text_color), 0);
+    }
+    if (s_route_battery_icon) {
+        lv_obj_set_style_text_color(
+            s_route_battery_icon, lv_color_hex(icon_color), 0);
+    }
+    bsp_lvgl_unlock();
+}
+
+static void battery_worker(void *arg)
+{
+    (void)arg;
+    esp_err_t error = bsp_battery_init();
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "battery gauge unavailable: %s", esp_err_to_name(error));
+        set_battery_text(-1);
+        vTaskDelete(NULL);
+        return;
+    }
+    for (;;) {
+        set_battery_text(bsp_battery_soc());
+        vTaskDelay(pdMS_TO_TICKS(BATTERY_REFRESH_MS));
+    }
+}
 
 static void show_view(lv_obj_t *view)
 {
@@ -193,7 +283,7 @@ static void show_current_stop(void)
     show_view(s_route_view);
     if (!s_trip.ready || s_trip.count == 0 || s_trip.current >= s_trip.count) {
         lv_label_set_text(s_route_title, "PASSPORT GUIDE");
-        lv_label_set_text(s_route_index, "-- / --");
+        lv_label_set_text(s_route_index, "--/--");
         lv_label_set_text(s_route_stage, "等待路线");
         lv_label_set_text(s_route_time, "--:--");
         lv_label_set_text(s_route_duration, "PHONE");
@@ -210,8 +300,8 @@ static void show_current_stop(void)
     char value[96];
     lv_label_set_text(s_route_title,
                       s_trip.title[0] ? s_trip.title : "今日行程");
-    snprintf(value, sizeof(value), "%02u / %02u",
-             (unsigned)(s_trip.current + 1), (unsigned)s_trip.count);
+    snprintf(value, sizeof(value), "%u/%u",
+             (unsigned)completed_stop_count(), (unsigned)s_trip.count);
     lv_label_set_text(s_route_index, value);
     snprintf(value, sizeof(value), "第 %u 站",
              (unsigned)(s_trip.current + 1));
@@ -334,6 +424,7 @@ static void record_task(void *arg)
     s_recording = false;
     const uint8_t end = PKT_RECORD_END;
     (void)notify_retry(&end, 1);
+    s_waiting_response = true;
     set_ui("Thinking", "Phone is contacting your AI", 0x7c6ed1);
     s_record_task = NULL;
     vTaskDelete(NULL);
@@ -352,6 +443,7 @@ static void start_recording(void)
     }
     const uint8_t start[] = {PKT_RECORD_START, SAMPLE_RATE & 0xff, SAMPLE_RATE >> 8};
     if (notify_retry(start, sizeof(start)) != ESP_OK) return;
+    guide_playback_restart(&s_playback_cancelled);
     s_recording = true;
     set_text("Speak naturally.\nRelease OK when finished.");
     set_ui("Listening", "Recording your question", 0xe26755);
@@ -386,6 +478,7 @@ static void audio_worker(void *arg)
                 s_playback_stop_requested = false;
                 ESP_LOGI(TAG, "playback finished after audio queue drained");
                 show_current_stop();
+                post_activity();
                 continue;
             }
             /*
@@ -404,12 +497,14 @@ static void audio_worker(void *arg)
             s_playback_stop_requested = false;
             xQueueReset(s_audio_queue);
             show_current_stop();
+            post_activity();
         } else if (command.type == AUDIO_END_PLAYBACK) {
             s_playing = false;
             s_playback_primed = false;
             s_playback_started = false;
             s_playback_ending = false;
             show_current_stop();
+            post_activity();
         } else if (command.type == AUDIO_PLAY_PACKET && s_playing) {
             if (!s_playback_primed) {
                 UBaseType_t target = s_playback_started
@@ -428,6 +523,7 @@ static void audio_worker(void *arg)
                     s_playback_stop_requested = false;
                     xQueueReset(s_audio_queue);
                     show_current_stop();
+                    post_activity();
                     continue;
                 }
                 s_playback_primed = true;
@@ -481,6 +577,7 @@ static void protocol_worker(void *arg)
         if (xQueueReceive(s_rx_queue, &packet, portMAX_DELAY) != pdTRUE ||
             packet.length == 0) continue;
         uint8_t type = packet.data[0];
+        if (type != PKT_PLAY_AUDIO) post_activity();
         if (type == PKT_TRANSCRIPT) {
             copy_packet_text(s_question_text, sizeof(s_question_text),
                              packet.data + 1, packet.length - 1);
@@ -491,6 +588,8 @@ static void protocol_worker(void *arg)
             }
             set_ui("You asked", "Waiting for the guide", 0x7c6ed1);
         } else if (type == PKT_ANSWER) {
+            if (!guide_playback_accept_stream(s_playback_cancelled)) continue;
+            s_waiting_response = false;
             if (!s_receiving_answer) {
                 s_answer_length = 0;
                 s_answer[0] = '\0';
@@ -499,14 +598,13 @@ static void protocol_worker(void *arg)
             append_answer(packet.data + 1, packet.length - 1);
             set_ui("Your guide", "Answer received", 0x3fa77f);
         } else if (type == PKT_PLAY_START) {
+            s_waiting_response = false;
             if (bsp_audio_set_format(SAMPLE_RATE, 16, 1) == ESP_OK) {
                 bsp_audio_set_volume(s_volume_percent);
                 /*
-                 * PLAY_START is the boundary of a new playback operation.
-                 * A cancelled operation deliberately has no RESPONSE_END, so
-                 * it cannot be used as the only place to close the previous
-                 * text stream. Reset here before the first text packet of a
-                 * replay arrives.
+                 * The user action that requested this operation already
+                 * reopened stream acceptance. Reset the text view here when
+                 * audio for that accepted operation begins.
                  */
                 guide_playback_text_start(&s_receiving_answer,
                                            &s_answer_length);
@@ -520,6 +618,7 @@ static void protocol_worker(void *arg)
                 set_ui("Your guide", "OK stops playback", 0x3fa77f);
             }
         } else if (type == PKT_PLAY_AUDIO && packet.length == 1 + BLOCK_BYTES) {
+            if (!guide_playback_accept_stream(s_playback_cancelled)) continue;
             audio_command_t command = {
                 .type = AUDIO_PLAY_PACKET,
                 .length = BLOCK_BYTES,
@@ -529,6 +628,8 @@ static void protocol_worker(void *arg)
                 set_ui("Audio delayed", "Phone is sending too quickly", 0xd99a45);
             }
         } else if (type == PKT_RESPONSE_END) {
+            if (!guide_playback_accept_stream(s_playback_cancelled)) continue;
+            s_waiting_response = false;
             s_answer_length =
                 guide_utf8_complete_prefix((const uint8_t *)s_answer,
                                            s_answer_length);
@@ -597,6 +698,7 @@ static void protocol_worker(void *arg)
                        0xd4534b);
             }
         } else if (type == PKT_ERROR) {
+            s_waiting_response = false;
             s_receiving_answer = false;
             if (s_playing) {
                 audio_command_t stop = {.type = AUDIO_STOP_PLAYBACK};
@@ -613,19 +715,98 @@ static void protocol_worker(void *arg)
     }
 }
 
+static app_event_type_t translate_button(bsp_btn_t button,
+                                         bsp_btn_ev_t event)
+{
+    if (button == BSP_BTN_UP && event == BSP_BTN_CLICK) {
+        return s_playing ? APP_VOLUME_UP : APP_PREVIOUS_STOP;
+    }
+    if (button == BSP_BTN_DOWN && event == BSP_BTN_CLICK) {
+        return s_playing ? APP_VOLUME_DOWN : APP_NEXT_STOP;
+    }
+    if (button == BSP_BTN_OK && event == BSP_BTN_LONG) {
+        return APP_HOLD_OK;
+    }
+    if (button == BSP_BTN_OK && event == BSP_BTN_RELEASE) {
+        return APP_RELEASE_OK;
+    }
+    if (button == BSP_BTN_OK && event == BSP_BTN_PRESS && s_playing) {
+        s_suppress_ok_click_until_us =
+            esp_timer_get_time() + (int64_t)OK_CLICK_SUPPRESS_MS * 1000;
+        return APP_STOP_AUDIO;
+    }
+    if (button == BSP_BTN_OK && event == BSP_BTN_DOUBLE &&
+        !s_playing && !s_recording) {
+        return APP_TOGGLE_COMPLETE;
+    }
+    if (button == BSP_BTN_OK && event == BSP_BTN_CLICK &&
+        !s_playing && !s_recording) {
+        int64_t now_us = esp_timer_get_time();
+        if (s_suppress_ok_click_until_us > now_us) {
+            s_suppress_ok_click_until_us = 0;
+            ESP_LOGI(TAG, "ignored click paired with playback stop");
+            return 0;
+        }
+        s_suppress_ok_click_until_us = 0;
+        return APP_PLAY_STOP;
+    }
+    return 0;
+}
+
 static void app_worker(void *arg)
 {
     (void)arg;
     app_event_t event;
+    guide_idle_init(&s_idle, uptime_ms(), DISPLAY_IDLE_TIMEOUT_MS);
     for (;;) {
-        if (xQueueReceive(s_event_queue, &event, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(s_event_queue, &event,
+                          pdMS_TO_TICKS(IDLE_CHECK_INTERVAL_MS)) != pdTRUE) {
+            if (guide_idle_should_sleep(&s_idle, uptime_ms(),
+                                        interaction_active())) {
+                if (set_display_awake(false) != ESP_OK) {
+                    guide_idle_mark_activity(&s_idle, uptime_ms());
+                    s_idle.awake = true;
+                }
+            }
+            continue;
+        }
+        if (event.type == APP_ACTIVITY) {
+            guide_idle_mark_activity(&s_idle, uptime_ms());
+            if (!s_idle.awake) {
+                if (set_display_awake(true) == ESP_OK) {
+                    s_idle.awake = true;
+                }
+            }
+            continue;
+        }
+        if (event.type == APP_BUTTON) {
+            guide_idle_button_result_t result = guide_idle_handle_button(
+                &s_idle, uptime_ms(), event.button,
+                (guide_idle_button_event_t)event.button_event);
+            if (result == GUIDE_IDLE_BUTTON_WAKE) {
+                if (set_display_awake(true) != ESP_OK) {
+                    ESP_LOGW(TAG, "display wake failed");
+                    s_idle.awake = false;
+                }
+                continue;
+            }
+            if (result == GUIDE_IDLE_BUTTON_CONSUME) continue;
+            event.type = translate_button(event.button, event.button_event);
+            if (!event.type) continue;
+        } else {
+            guide_idle_mark_activity(&s_idle, uptime_ms());
+            if (!s_idle.awake && set_display_awake(true) == ESP_OK) {
+                s_idle.awake = true;
+            }
+        }
         if (event.type == APP_HOLD_OK) {
             start_recording();
         } else if (event.type == APP_RELEASE_OK) {
             stop_recording();
         } else if (event.type == APP_STOP_AUDIO) {
             s_playback_stop_requested = true;
-            guide_playback_text_stop(&s_receiving_answer);
+            s_waiting_response = false;
+            guide_playback_cancel(&s_playback_cancelled, &s_receiving_answer);
             const uint8_t cancel = PKT_TRIP_PLAY_CANCEL;
             if (notify_retry(&cancel, 1) != ESP_OK) {
                 ESP_LOGW(TAG, "phone did not acknowledge playback cancellation");
@@ -679,6 +860,8 @@ static void app_worker(void *arg)
             }
             uint8_t packet[] = {PKT_TRIP_PLAY_REQUEST, s_trip.current};
             if (notify_retry(packet, sizeof(packet)) == ESP_OK) {
+                guide_playback_restart(&s_playback_cancelled);
+                s_waiting_response = true;
                 set_ui(NULL, "Loading offline guide...", 0x7c6ed1);
                 ESP_LOGI(TAG, "offline playback requested for stop %u",
                          s_trip.current);
@@ -697,6 +880,7 @@ static void app_worker(void *arg)
             if (!event.connected) {
                 s_recording = false;
                 s_playing = false;
+                s_waiting_response = false;
                 set_text("Open Passport Guide on your phone,\nthen scan and connect.");
                 set_ui("Waiting for phone", "Bluetooth is advertising", 0xd99a45);
             } else if (!event.ready) {
@@ -775,18 +959,47 @@ static void create_ui(void)
     lv_obj_set_style_text_color(brand, lv_color_hex(COLOR_HEADER), 0);
     lv_obj_set_pos(brand, 18, 9);
 
+    lv_obj_t *battery_group = lv_obj_create(s_route_view);
+    lv_obj_set_size(battery_group, 50, 20);
+    lv_obj_set_pos(battery_group, 172, 7);
+    lv_obj_set_style_bg_opa(battery_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(battery_group, 0, 0);
+    lv_obj_set_style_pad_all(battery_group, 0, 0);
+    lv_obj_set_style_pad_column(battery_group, 2, 0);
+    lv_obj_set_flex_flow(battery_group, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(
+        battery_group, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(battery_group, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_route_battery_icon = lv_label_create(battery_group);
+    lv_label_set_text(s_route_battery_icon, LV_SYMBOL_CHARGE);
+    lv_obj_set_size(s_route_battery_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(
+        s_route_battery_icon, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(
+        s_route_battery_icon, lv_color_hex(COLOR_MUTED), 0);
+
+    s_route_battery = lv_label_create(battery_group);
+    lv_label_set_text(s_route_battery, "--%");
+    lv_obj_set_size(s_route_battery, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(s_route_battery, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_route_battery, lv_color_hex(COLOR_HEADER), 0);
+
     s_route_title = lv_label_create(s_route_view);
-    lv_obj_set_size(s_route_title, 150, 27);
+    lv_obj_set_size(s_route_title, 154, 27);
     lv_label_set_long_mode(s_route_title, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(s_route_title, &guide_font_14, 0);
     lv_obj_set_style_text_color(s_route_title, lv_color_hex(COLOR_TICKET), 0);
     lv_obj_set_pos(s_route_title, 18, 24);
 
     s_route_index = lv_label_create(s_route_view);
-    lv_label_set_text(s_route_index, "-- / --");
-    lv_obj_set_style_text_font(s_route_index, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(s_route_index, lv_color_hex(COLOR_HEADER), 0);
-    lv_obj_align(s_route_index, LV_ALIGN_TOP_RIGHT, -18, 15);
+    lv_label_set_text(s_route_index, "--/--");
+    lv_obj_set_size(s_route_index, 44, 27);
+    lv_label_set_long_mode(s_route_index, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_route_index, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(s_route_index, &guide_font_14, 0);
+    lv_obj_set_style_text_color(s_route_index, lv_color_hex(COLOR_TICKET), 0);
+    lv_obj_set_pos(s_route_index, 178, 24);
 
     lv_obj_t *ticket = lv_obj_create(s_route_view);
     lv_obj_set_size(ticket, 208, 184);
@@ -996,38 +1209,20 @@ esp_err_t guide_app_start(void)
         xTaskCreate(app_worker, "guide_events", 3584, NULL, 4, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
+    if (xTaskCreate(battery_worker, "guide_battery", 3072, NULL, 2, NULL) !=
+        pdPASS) {
+        ESP_LOGW(TAG, "battery UI worker could not start");
+    }
     return guide_ble_start(ble_rx, ble_state, NULL);
 }
 
 void guide_app_button(bsp_btn_t button, bsp_btn_ev_t event)
 {
     if (!s_event_queue) return;
-    app_event_t app_event = {0};
-    if (button == BSP_BTN_UP && event == BSP_BTN_CLICK) {
-        app_event.type = s_playing ? APP_VOLUME_UP : APP_PREVIOUS_STOP;
-    } else if (button == BSP_BTN_DOWN && event == BSP_BTN_CLICK) {
-        app_event.type = s_playing ? APP_VOLUME_DOWN : APP_NEXT_STOP;
-    } else if (button == BSP_BTN_OK && event == BSP_BTN_LONG) {
-        app_event.type = APP_HOLD_OK;
-    } else if (button == BSP_BTN_OK && event == BSP_BTN_RELEASE) {
-        app_event.type = APP_RELEASE_OK;
-    } else if (button == BSP_BTN_OK && event == BSP_BTN_PRESS && s_playing) {
-        s_suppress_ok_click_until_us =
-            esp_timer_get_time() + (int64_t)OK_CLICK_SUPPRESS_MS * 1000;
-        app_event.type = APP_STOP_AUDIO;
-    } else if (button == BSP_BTN_OK && event == BSP_BTN_DOUBLE &&
-               !s_playing && !s_recording) {
-        app_event.type = APP_TOGGLE_COMPLETE;
-    } else if (button == BSP_BTN_OK && event == BSP_BTN_CLICK &&
-               !s_playing && !s_recording) {
-        int64_t now_us = esp_timer_get_time();
-        if (s_suppress_ok_click_until_us > now_us) {
-            s_suppress_ok_click_until_us = 0;
-            ESP_LOGI(TAG, "ignored click paired with playback stop");
-        } else {
-            s_suppress_ok_click_until_us = 0;
-            app_event.type = APP_PLAY_STOP;
-        }
-    }
-    if (app_event.type) (void)xQueueSend(s_event_queue, &app_event, 0);
+    app_event_t app_event = {
+        .type = APP_BUTTON,
+        .button = button,
+        .button_event = event,
+    };
+    (void)xQueueSend(s_event_queue, &app_event, 0);
 }

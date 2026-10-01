@@ -24,6 +24,10 @@ esp_lcd_panel_io_handle_t bsp_display_io(void);
 // 背光亮度 0..100(%)。LEDC PWM,0=全灭。
 void bsp_display_backlight(uint8_t percent);
 
+// 可逆地开启或关闭日常显示。关闭时熄灭背光并发送 Display Off；开启时发送
+// Display On 并恢复最近一次非零背光亮度。与 deep-sleep 终端接口不同，可反复调用。
+esp_err_t bsp_display_set_awake(bool awake);
+
 // deep sleep 专用：关闭显示、让 ST7789 进入 Sleep In，停止背光 PWM，
 // 将 CS/SCLK/MOSI/DC/背光设为安全电平并在 deep sleep 中保持。调用时必须
 // 已阻止 LVGL 刷屏，调用后必须立即进入 deep sleep 或重启。

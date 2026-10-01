@@ -17,6 +17,16 @@ int main(void)
     guide_playback_text_stop(&receiving);
     assert(!receiving);
 
+    bool cancelled = false;
+    receiving = true;
+    guide_playback_cancel(&cancelled, &receiving);
+    assert(cancelled);
+    assert(!receiving);
+    assert(!guide_playback_accept_stream(cancelled));
+    guide_playback_restart(&cancelled);
+    assert(!cancelled);
+    assert(guide_playback_accept_stream(cancelled));
+
     puts("Guide playback completion tests: PASS");
     return 0;
 }

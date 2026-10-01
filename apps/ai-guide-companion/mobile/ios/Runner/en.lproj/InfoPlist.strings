@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "AI Guide Companion";
+"NSBluetoothAlwaysUsageDescription" = "Connect to AI Passport to sync trips and relay guide audio and voice questions.";
+"NSMicrophoneUsageDescription" = "Record your travel questions for speech recognition and AI guide replies.";

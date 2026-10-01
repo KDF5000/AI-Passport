@@ -14,6 +14,7 @@ import 'ble/guide_ble_session.dart';
 import 'platform/background_execution.dart';
 import 'protocol/guide_protocol.dart';
 import 'protocol/ima_adpcm.dart';
+import 'protocol/passport_operation.dart';
 import 'protocol/trip_protocol.dart';
 import 'trip/trip_plan.dart';
 import 'trip/trip_planner.dart';
@@ -61,7 +62,7 @@ final class GuideController extends ChangeNotifier {
   final List<Map<String, String>> _history = [];
   int _sampleRate = 16000;
   int _operationId = 0;
-  int? _passportPlaybackOperation;
+  final PassportOperationState _passportOperation = PassportOperationState();
   Timer? _slowResponseTimer;
   AiGateway? _activeGateway;
   bool _tripGenerationCancelled = false;
@@ -250,7 +251,7 @@ final class GuideController extends ChangeNotifier {
           unawaited(playOfflineGuide(packet[1]));
         }
       case GuidePacketType.tripPlayCancel:
-        _cancelPassportPlayback();
+        _cancelPassportOperation();
       case GuidePacketType.error:
         status = String.fromCharCodes(packet.skip(1));
         notifyListeners();
@@ -391,7 +392,10 @@ final class GuideController extends ChangeNotifier {
     final operation = ++_operationId;
     final playOnPassport = connection == GuideConnectionState.connected;
     if (playOnPassport) {
-      _passportPlaybackOperation = operation;
+      _passportOperation.start(
+        operation,
+        PassportOperationKind.offlinePlayback,
+      );
     }
     tripStatus = playOnPassport
         ? '正在 Passport 播放缓存讲解 · 未使用网络'
@@ -418,9 +422,7 @@ final class GuideController extends ChangeNotifier {
     } catch (error) {
       tripStatus = 'Offline playback failed: $error';
     } finally {
-      if (_passportPlaybackOperation == operation) {
-        _passportPlaybackOperation = null;
-      }
+      _passportOperation.finish(operation);
       if (operation == _operationId) {
         busy = false;
         notifyListeners();
@@ -428,13 +430,27 @@ final class GuideController extends ChangeNotifier {
     }
   }
 
-  void _cancelPassportPlayback() {
-    final operation = _passportPlaybackOperation;
-    if (!busy || operation == null || operation != _operationId) return;
-    _passportPlaybackOperation = null;
+  void _cancelPassportOperation() {
+    final operation = _operationId;
+    if (!busy) return;
+    final kind = _passportOperation.cancel(operation);
+    if (kind == null) return;
     _operationId += 1;
+    _slowResponseTimer?.cancel();
+    _activeGateway?.close();
+    _activeGateway = null;
+    unawaited(mobileVoice.stopPlayback());
+    unawaited(_endPassportBackgroundLease());
+    _recording.clear();
     busy = false;
-    tripStatus = 'Passport playback stopped';
+    slowResponse = false;
+    if (kind == PassportOperationKind.conversation) {
+      status = 'Stopped · hold OK to ask again';
+      voiceStatus = 'Ready · hold OK to ask again';
+      retryAvailable = transcript.isNotEmpty;
+    } else {
+      tripStatus = 'Passport playback stopped';
+    }
     notifyListeners();
   }
 
@@ -695,6 +711,7 @@ final class GuideController extends ChangeNotifier {
     final gateway = AiGateway(settings);
     _activeGateway = gateway;
     final operation = ++_operationId;
+    _passportOperation.start(operation, PassportOperationKind.conversation);
     try {
       final pcm = _pcmBytes(_recording);
       transcript = await gateway.transcribePcm(pcm, sampleRate: _sampleRate);
@@ -714,6 +731,7 @@ final class GuideController extends ChangeNotifier {
         // Preserve the original request error when BLE also disconnected.
       }
     } finally {
+      _passportOperation.finish(operation);
       _recording.clear();
       gateway.close();
       await _endPassportBackgroundLease();

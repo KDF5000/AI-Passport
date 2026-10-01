@@ -15,3 +15,19 @@ void guide_playback_text_stop(bool *receiving)
 {
     if (receiving) *receiving = false;
 }
+
+void guide_playback_cancel(bool *cancelled, bool *receiving)
+{
+    if (cancelled) *cancelled = true;
+    if (receiving) *receiving = false;
+}
+
+void guide_playback_restart(bool *cancelled)
+{
+    if (cancelled) *cancelled = false;
+}
+
+bool guide_playback_accept_stream(bool cancelled)
+{
+    return !cancelled;
+}

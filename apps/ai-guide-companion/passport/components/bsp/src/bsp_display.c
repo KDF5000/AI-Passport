@@ -19,6 +19,8 @@ static esp_lcd_panel_io_handle_t s_io;
 static bool                      s_bus_ready;
 static bool                      s_bl_ready;
 static bool                      s_ready;
+static bool                      s_awake;
+static uint8_t                   s_saved_backlight = 100;
 
 static const gpio_num_t s_deep_sleep_pins[] = {
     BSP_LCD_CS, BSP_LCD_SCLK, BSP_LCD_MOSI, BSP_LCD_DC, BSP_LCD_BL,
@@ -203,6 +205,7 @@ esp_err_t bsp_display_init(void) {
     e = backlight_init();
     if (e != ESP_OK) goto fail;
     s_ready = true;
+    s_awake = true;
     ESP_LOGI(TAG, "显示就绪 %dx%d", BSP_LCD_W, BSP_LCD_H);
     return ESP_OK;
 
@@ -224,6 +227,7 @@ fail:
         else ESP_LOGE(TAG, "SPI 总线回滚失败: %s", esp_err_to_name(cleanup));
     }
     s_bl_ready = false;
+    s_awake = false;
     return e;
 }
 
@@ -234,10 +238,29 @@ esp_lcd_panel_io_handle_t bsp_display_io(void) { return s_io; }
 void bsp_display_backlight(uint8_t percent) {
     if (!s_bl_ready) return;
     if (percent > 100) percent = 100;
+    if (percent > 0) s_saved_backlight = percent;
     uint32_t max_duty = (1u << BSP_BL_LEDC_RES) - 1u;
     uint32_t duty = (max_duty * percent) / 100u;
     ledc_set_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL, duty);
     ledc_update_duty(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL);
+}
+
+esp_err_t bsp_display_set_awake(bool awake) {
+    if (!s_ready || !s_panel) return ESP_ERR_INVALID_STATE;
+    if (s_awake == awake) return ESP_OK;
+
+    if (!awake) bsp_display_backlight(0);
+    esp_err_t e = esp_lcd_panel_disp_on_off(s_panel, awake);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 日常显示%s失败: %s",
+                 awake ? "开启" : "关闭", esp_err_to_name(e));
+        if (!awake) bsp_display_backlight(s_saved_backlight);
+        return e;
+    }
+    s_awake = awake;
+    if (awake) bsp_display_backlight(s_saved_backlight);
+    ESP_LOGI(TAG, "日常显示已%s", awake ? "唤醒" : "关闭");
+    return ESP_OK;
 }
 
 esp_err_t bsp_display_prepare_deep_sleep(void) {
@@ -259,6 +282,7 @@ esp_err_t bsp_display_prepare_deep_sleep(void) {
     }
 
     bsp_display_backlight(0);
+    s_awake = false;
     if (s_bl_ready && BSP_LCD_BL >= 0) {
         esp_err_t e = ledc_stop(BSP_BL_LEDC_MODE, BSP_BL_LEDC_CHANNEL, 0);
         if (e != ESP_OK) {
