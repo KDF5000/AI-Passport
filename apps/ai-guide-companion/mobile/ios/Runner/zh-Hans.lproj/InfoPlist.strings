@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "AI 随行导游";
+"NSBluetoothAlwaysUsageDescription" = "连接 AI Passport，以同步行程并传输导游讲解和语音问题。";
+"NSMicrophoneUsageDescription" = "录制你的旅行问题，用于语音识别和 AI 导游回答。";

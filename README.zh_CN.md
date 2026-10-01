@@ -12,6 +12,7 @@
 | 应用 | 说明 |
 | --- | --- |
 | [`offline-habit-tracker`](apps/offline-habit-tracker/README.zh_CN.md) | 离线每日习惯热力图，支持掉电保存打卡、本地 Wi-Fi 照片管理和照片屏保 |
+| [`ai-guide-companion`](apps/ai-guide-companion/README.zh_CN.md) | 手机中转、AI Passport 作为语音终端的 BLE 对话 MVP |
 
 请进入应用自己的目录执行构建和测试。例如：
 

@@ -13,6 +13,7 @@ configuration, documentation, tests, and build instructions.
 | Application | Description |
 | --- | --- |
 | [`offline-habit-tracker`](apps/offline-habit-tracker/README.md) | Offline daily habit heatmap with persistent check-ins, local Wi-Fi photo management, and a photo screensaver |
+| [`ai-guide-companion`](apps/ai-guide-companion/README.md) | BLE voice-conversation MVP with an iOS/Android phone companion and AI Passport terminal |
 
 Build and test an application from its own directory. For example:
 
