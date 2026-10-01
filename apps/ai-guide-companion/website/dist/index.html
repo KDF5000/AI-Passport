@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AI 随行导游：手机生成并缓存旅程，FoloToy AI Passport 随身显示、讲解与语音问答。">
+  <meta name="theme-color" content="#214f47">
+  <title>AI 随行导游｜手机规划，Passport 陪你走</title>
+  <link rel="icon" type="image/svg+xml" href="assets/app-icon.svg">
+  <style>
+    :root {
+      --ink: #1f2929;
+      --paper: #f6f0e2;
+      --paper-light: #fffaf0;
+      --green: #214f47;
+      --green-deep: #173c36;
+      --mint: #dcebe4;
+      --mint-strong: #a9d1c2;
+      --gold: #e7b757;
+      --red: #b95c44;
+      --muted: #68716d;
+      --line: rgba(31, 41, 41, .14);
+      --shadow: 0 24px 70px rgba(23, 60, 54, .13);
+      --radius: 28px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: inherit; }
+    img { display: block; max-width: 100%; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    .wrap { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--red);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid rgba(33, 79, 71, .1);
+      background: rgba(246, 240, 226, .9);
+      backdrop-filter: blur(18px);
+    }
+    .nav-inner {
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--green);
+      text-decoration: none;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .brand img { width: 36px; height: 36px; border-radius: 9px; }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { text-decoration: none; font-size: .92rem; font-weight: 650; }
+    .nav-links a:hover { color: var(--red); }
+
+    .button {
+      min-height: 48px;
+      padding: 10px 21px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--green);
+      border-radius: 14px;
+      text-decoration: none;
+      font-weight: 750;
+      line-height: 1.2;
+      transition: transform .2s ease, background .2s ease, color .2s ease;
+    }
+    .button:hover { transform: translateY(-2px); }
+    .button-primary { color: white; background: var(--green); }
+    .button-primary:hover { background: var(--green-deep); }
+    .button-secondary { color: var(--green); background: rgba(255, 250, 240, .55); }
+    .button-secondary:hover { background: var(--paper-light); }
+    .button-light { color: var(--green); border-color: var(--paper-light); background: var(--paper-light); }
+    .button-quiet { color: var(--paper-light); border-color: rgba(255,255,255,.34); background: transparent; }
+
+    .hero {
+      min-height: calc(100svh - 68px);
+      padding: 68px 0 76px;
+      overflow: hidden;
+      display: grid;
+      align-items: center;
+      background:
+        radial-gradient(circle at 78% 35%, rgba(231, 183, 87, .22) 0 15rem, transparent 15.1rem),
+        radial-gradient(circle at 93% 5%, rgba(169, 209, 194, .42), transparent 26rem);
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.03fr) minmax(360px, .97fr);
+      align-items: center;
+      gap: 72px;
+    }
+    .hero-copy, .hero-visual { min-width: 0; }
+    h1, h2, h3, p { overflow-wrap: anywhere; }
+    h1 {
+      margin: 0;
+      max-width: 760px;
+      color: var(--green);
+      font-size: clamp(3.3rem, 7.1vw, 6.8rem);
+      line-height: .96;
+      letter-spacing: -.065em;
+    }
+    h1 span { display: block; color: var(--ink); }
+    .hero-copy .lede {
+      max-width: 650px;
+      margin: 28px 0 0;
+      color: #4f5d58;
+      font-size: clamp(1.08rem, 1.8vw, 1.3rem);
+      line-height: 1.72;
+    }
+    .hero-actions { margin-top: 34px; display: flex; flex-wrap: wrap; gap: 12px; }
+    .hero-note { margin: 18px 0 0; color: var(--muted); font-size: .9rem; }
+
+    .hero-visual {
+      position: relative;
+      min-height: 640px;
+      display: grid;
+      place-items: center;
+    }
+    .orbit {
+      position: absolute;
+      width: 96%;
+      aspect-ratio: 1;
+      border: 2px dashed rgba(33, 79, 71, .23);
+      border-radius: 50%;
+      transform: rotate(-18deg);
+    }
+    .phone {
+      position: relative;
+      z-index: 2;
+      width: min(335px, 74vw);
+      aspect-ratio: 1170 / 2532;
+      padding: 10px;
+      border-radius: 48px;
+      background: #111c19;
+      box-shadow: 0 36px 90px rgba(18, 54, 47, .27);
+      transform: rotate(2deg);
+    }
+    .phone img { width: 100%; height: 100%; object-fit: cover; border-radius: 39px; }
+    .section { padding: 96px 0; }
+    .section-head { max-width: 760px; margin-bottom: 46px; }
+    h2 {
+      margin: 0;
+      color: var(--green);
+      font-size: clamp(2.25rem, 4.7vw, 4.5rem);
+      line-height: 1.05;
+      letter-spacing: -.045em;
+    }
+    .section-head > p:last-child { margin: 18px 0 0; color: var(--muted); font-size: 1.06rem; }
+
+    .journey { color: var(--paper-light); background: var(--green); }
+    .journey h2 { color: var(--paper-light); }
+    .journey .eyebrow { color: var(--gold); }
+    .journey .section-head > p:last-child { color: #c9ddd6; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; counter-reset: step; }
+    .step {
+      min-height: 246px;
+      padding: 26px;
+      position: relative;
+      overflow: hidden;
+      color: var(--ink);
+      border-radius: var(--radius);
+      background: var(--paper-light);
+    }
+    .step::before {
+      counter-increment: step;
+      content: "0" counter(step);
+      color: var(--red);
+      font: 800 1rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .step h3 { margin: 54px 0 10px; font-size: 1.35rem; line-height: 1.25; }
+    .step p { margin: 0; color: var(--muted); }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: 74px;
+      align-items: center;
+    }
+    .showcase {
+      margin: 0;
+      overflow: hidden;
+      border-radius: 34px;
+      background: var(--green);
+      box-shadow: var(--shadow);
+    }
+    .showcase img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
+    .product-copy h2 { max-width: 610px; }
+    .product-copy > p { margin: 20px 0 0; color: var(--muted); font-size: 1.05rem; }
+    .benefits { margin: 34px 0 0; display: grid; gap: 22px; }
+    .benefit { display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start; }
+    .benefit-mark {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      color: var(--green);
+      border-radius: 50%;
+      background: var(--gold);
+      font-weight: 850;
+    }
+    .benefit h3 { margin: 0 0 4px; font-size: 1.14rem; }
+    .benefit p { margin: 0; color: var(--muted); }
+
+    .offline {
+      background:
+        linear-gradient(90deg, rgba(220,235,228,.72), rgba(255,250,240,.6)),
+        var(--paper-light);
+    }
+    .offline-grid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 80px; align-items: start; }
+    .ticket {
+      position: sticky;
+      top: 102px;
+      overflow: hidden;
+      padding: 34px;
+      border: 1px solid rgba(33, 79, 71, .12);
+      border-radius: var(--radius);
+      background: var(--paper-light);
+      box-shadow: 0 20px 50px rgba(33,79,71,.08);
+    }
+    .ticket::before, .ticket::after {
+      content: "";
+      position: absolute;
+      top: 55%;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #e5eee8;
+    }
+    .ticket::before { left: -16px; }
+    .ticket::after { right: -16px; }
+    .ticket-label { color: var(--red); font-size: .76rem; font-weight: 800; letter-spacing: .14em; }
+    .ticket h3 { margin: 15px 0 28px; color: var(--green); font-size: 1.8rem; line-height: 1.2; }
+    .ticket-row {
+      padding: 16px 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      border-top: 1px dashed rgba(33,79,71,.22);
+    }
+    .ticket-row strong { color: var(--green); }
+    .boundary-list { display: grid; gap: 0; }
+    .boundary {
+      padding: 27px 0;
+      display: grid;
+      grid-template-columns: 46px 1fr;
+      gap: 18px;
+      border-bottom: 1px solid rgba(33,79,71,.16);
+    }
+    .boundary:first-child { padding-top: 0; }
+    .boundary-num {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      color: var(--paper-light);
+      border-radius: 50%;
+      background: var(--green);
+      font-weight: 800;
+    }
+    .boundary h3 { margin: 0 0 6px; font-size: 1.24rem; }
+    .boundary p { margin: 0; color: var(--muted); }
+
+    .install { color: white; background: var(--green-deep); }
+    .install .section-head { max-width: 820px; }
+    .install h2 { color: white; }
+    .install .eyebrow { color: var(--gold); }
+    .install .section-head > p:last-child { color: #c7d9d3; }
+    .install-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .install-card {
+      min-height: 255px;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.07);
+    }
+    .install-card.featured { color: var(--ink); background: var(--gold); border-color: var(--gold); }
+    .install-kicker { font-size: .78rem; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; opacity: .72; }
+    .install-card h3 { margin: 18px 0 9px; font-size: 1.48rem; line-height: 1.25; }
+    .install-card p { margin: 0 0 25px; color: #c7d9d3; }
+    .install-card.featured p { color: #43504c; }
+    .install-card .button { margin-top: auto; }
+
+    footer { padding: 28px 0 40px; color: var(--muted); background: var(--paper-light); }
+    .footer-inner { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+    .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+    .footer-links a { color: var(--green); text-decoration: none; font-weight: 700; }
+
+    @media (max-width: 940px) {
+      .nav-links a:not(.nav-action) { display: none; }
+      .hero { min-height: auto; padding-top: 58px; }
+      .hero-grid, .product-grid, .offline-grid { grid-template-columns: minmax(0, 1fr); gap: 52px; }
+      .hero-copy { max-width: 720px; }
+      .hero-visual { min-height: 600px; }
+      .steps { grid-template-columns: repeat(2, 1fr); }
+      .showcase { width: min(620px, 100%); }
+      .ticket { position: static; }
+    }
+    @media (max-width: 620px) {
+      .wrap { width: min(100% - 28px, 1160px); }
+      .nav-inner { min-height: 62px; }
+      .brand img { width: 32px; height: 32px; }
+      .brand span { font-size: .94rem; }
+      .nav-action { min-height: 40px; padding: 8px 14px; border-radius: 12px; font-size: .86rem !important; }
+      .hero { padding: 44px 0 58px; }
+      h1 { font-size: clamp(3rem, 15vw, 4.7rem); }
+      h1 .latin { font-size: .91em; letter-spacing: -.075em; }
+      .hero-copy .lede { font-size: 1.03rem; }
+      .hero-actions { flex-direction: column; align-items: stretch; }
+      .hero-actions .button { width: 100%; }
+      .hero-visual { min-height: 535px; }
+      .phone { width: 270px; border-radius: 40px; padding: 8px; }
+      .phone img { border-radius: 33px; }
+      .section { padding: 68px 0; }
+      .section-head { margin-bottom: 34px; }
+      .steps, .install-grid { grid-template-columns: 1fr; }
+      .step { min-height: 205px; }
+      .step h3 { margin-top: 35px; }
+      .product-grid { gap: 38px; }
+      .showcase { border-radius: 24px; }
+      .ticket, .install-card { padding: 25px; }
+      .footer-inner { flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .button { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="主导航">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top">
+        <img src="assets/app-icon.svg" alt="">
+        <span>AI 随行导游</span>
+      </a>
+      <div class="nav-links">
+        <a href="#journey">使用方式</a>
+        <a href="#product">手机与 Passport</a>
+        <a href="#offline">离线体验</a>
+        <a class="button button-primary nav-action" href="#install">开始安装</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Travel pass · AI companion</p>
+          <h1>手机规划，<span class="latin">Passport</span><span>陪你走。</span></h1>
+          <p class="lede">出发前让 AI 生成路线与讲解，旅途中把手机收进口袋。看一眼下一站，按一下听讲解，长按就能直接问 AI。</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://testflight.apple.com/join/aBvvbBcx">通过 TestFlight 安装</a>
+            <a class="button button-secondary" href="https://bytedance.larkoffice.com/docx/Ye1FdJKLdoT2tSxKVbXc72QPnwb">查看使用教程</a>
+          </div>
+          <p class="hero-note">当前已验证 iPhone 与 FoloToy AI Passport；其他平台可从源码自行构建。</p>
+        </div>
+        <div class="hero-visual" aria-label="AI 随行导游手机 App 界面">
+          <div class="orbit" aria-hidden="true"></div>
+          <figure class="phone">
+            <img src="assets/app-trip.jpg" alt="AI 随行导游 App 行程票界面，展示旅程、当前站点和离线讲解">
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section journey" id="journey">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="eyebrow">一次准备，边走边听</p>
+          <h2>从一个目的地，到一段可以随身播放的旅程。</h2>
+          <p>AI 生成行程草案，你确认路线和关键信息；到现场后，手机负责服务，Passport 负责陪伴。</p>
+        </header>
+        <div class="steps">
+          <article class="step"><h3>创建行程</h3><p>填写目的地、日期、时间与游玩偏好，也可以加入不可错过的演出或预约。</p></article>
+          <article class="step"><h3>AI 生成路线</h3><p>一次得到站点顺序、游玩提示与完整讲解，再由你审核保存。</p></article>
+          <article class="step"><h3>准备离线包</h3><p>在网络稳定时缓存路线和语音，把旅途中的等待降到更低。</p></article>
+          <article class="step"><h3>连接 Passport</h3><p>同步当天行程，短按播放讲解，长按说出想问的问题。</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="product">
+      <div class="wrap product-grid">
+        <figure class="showcase">
+          <img src="assets/product-showcase.png" alt="AI 随行导游手机 App 与 FoloToy AI Passport 配合使用的产品展示">
+        </figure>
+        <div class="product-copy">
+          <p class="eyebrow">Two screens, one journey</p>
+          <h2>复杂的准备留给手机，旅途中的交互交给 Passport。</h2>
+          <p>手机端管理行程、连接 AI 服务并缓存内容；Passport 显示当前站点、播放讲解、接收语音问题。两端各做自己最擅长的事。</p>
+          <div class="benefits">
+            <article class="benefit">
+              <span class="benefit-mark">1</span>
+              <div><h3>路线与进度同步</h3><p>下一站、游玩顺序和完成进度随身可见。</p></div>
+            </article>
+            <article class="benefit">
+              <span class="benefit-mark">2</span>
+              <div><h3>讲解提前缓存</h3><p>常规游览不必每一步都请求 AI 或等待语音生成。</p></div>
+            </article>
+            <article class="benefit">
+              <span class="benefit-mark">3</span>
+              <div><h3>遇到问题再问 AI</h3><p>主动提问时才联网，让在线能力成为补充而不是依赖。</p></div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section offline" id="offline">
+      <div class="wrap offline-grid">
+        <aside class="ticket">
+          <div class="ticket-label">OFFLINE FIRST</div>
+          <h3>网络不稳定，行程也不必停下来。</h3>
+          <div class="ticket-row"><span>路线与进度</span><strong>本地保存</strong></div>
+          <div class="ticket-row"><span>已缓存讲解</span><strong>离线播放</strong></div>
+          <div class="ticket-row"><span>AI 问答</span><strong>按需联网</strong></div>
+        </aside>
+        <div>
+          <header class="section-head">
+            <p class="eyebrow">少请求，少等待</p>
+            <h2>只有主动操作，才会调用在线服务。</h2>
+          </header>
+          <div class="boundary-list">
+            <article class="boundary"><span class="boundary-num">1</span><div><h3>生成或重新规划行程</h3><p>根据时间、节奏和固定安排生成完整路线与讲解。</p></div></article>
+            <article class="boundary"><span class="boundary-num">2</span><div><h3>主动询问 AI</h3><p>手机完成识别、回答与语音合成，再把结果传给 Passport。</p></div></article>
+            <article class="boundary"><span class="boundary-num">3</span><div><h3>补充尚未缓存的语音</h3><p>只有准备离线包时，才为缺失的讲解生成并保存语音。</p></div></article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section install" id="install">
+      <div class="wrap">
+        <header class="section-head">
+          <p class="eyebrow">开始体验</p>
+          <h2>先安装手机 App 与 Passport 固件。</h2>
+          <p>iPhone 与 Passport 都有无需编译的安装方式；开发者和非 iOS 用户也可以直接获取完整源码。</p>
+        </header>
+        <div class="install-grid">
+          <article class="install-card featured">
+            <span class="install-kicker">iPhone App</span>
+            <h3>TestFlight 公开测试</h3>
+            <p>在 iPhone 上打开公开测试链接，接受邀请后即可安装。</p>
+            <a class="button button-primary" href="https://testflight.apple.com/join/aBvvbBcx">安装手机 App</a>
+          </article>
+          <article class="install-card">
+            <span class="install-kicker">Passport firmware</span>
+            <h3>FoloToy 社区固件</h3>
+            <p>从玩法页面安装完整固件，普通用户无需配置开发环境。</p>
+            <a class="button button-light" href="https://ai-passport.folotoy.cn/plays/792/">安装 Passport 固件</a>
+          </article>
+          <article class="install-card">
+            <span class="install-kicker">User guide</span>
+            <h3>完整使用教程</h3>
+            <p>查看首次配置、AI 服务申请、连接设备与常见问题。</p>
+            <a class="button button-quiet" href="https://bytedance.larkoffice.com/docx/Ye1FdJKLdoT2tSxKVbXc72QPnwb">打开飞书文档</a>
+          </article>
+          <article class="install-card">
+            <span class="install-kicker">Open source</span>
+            <h3>从源码自行构建</h3>
+            <p>适合非 iOS 平台，或希望修改、调试手机端与 Passport 固件的开发者。</p>
+            <a class="button button-quiet" href="https://github.com/KDF5000/AI-Passport">前往 GitHub</a>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <span>AI 随行导游 · 离线优先的旅行伙伴</span>
+      <div class="footer-links">
+        <a href="https://bytedance.larkoffice.com/docx/Ye1FdJKLdoT2tSxKVbXc72QPnwb">使用教程</a>
+        <a href="https://ai-passport.folotoy.cn/plays/792/">社区固件</a>
+        <a href="https://github.com/KDF5000/AI-Passport">GitHub</a>
+      </div>
+      <span>AI 行程仅供规划参考，开放时间与场次请以官方信息为准。</span>
+    </div>
+  </footer>
+</body>
+</html>

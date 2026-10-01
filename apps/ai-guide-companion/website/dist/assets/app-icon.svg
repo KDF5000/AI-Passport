@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#F6F0E2"/>
+  <circle cx="872" cy="125" r="258" fill="#DCEBE4"/>
+  <circle cx="114" cy="916" r="265" fill="#E7B757" opacity=".17"/>
+  <g filter="url(#shadow)">
+    <path d="M212 212h600c49 0 89 40 89 89v373c0 49-40 89-89 89H518L339 875l42-112H212
+             c-49 0-89-40-89-89V301c0-49 40-89 89-89z"
+          fill="#214F47"/>
+  </g>
+  <path d="M284 582c70-135 163-195 262-143 69 36 103 88 190 48"
+        fill="none" stroke="#A9D1C2" stroke-width="48" stroke-linecap="round"/>
+  <circle cx="284" cy="582" r="34" fill="#FFFAF0"/>
+  <path d="M740 394l18 52 52 18-52 18-18 52-18-52-52-18 52-18z"
+        fill="#E7B757"/>
+  <path d="M278 327h202M278 385h129" fill="none" stroke="#FFFAF0"
+        stroke-width="27" stroke-linecap="round"/>
+  <circle cx="606" cy="650" r="17" fill="#A9D1C2"/>
+  <circle cx="663" cy="650" r="17" fill="#FFFAF0"/>
+  <circle cx="720" cy="650" r="17" fill="#E7B757"/>
+  <defs>
+    <filter id="shadow" x="80" y="170" width="864" height="767" filterUnits="userSpaceOnUse">
+      <feDropShadow dy="27" stdDeviation="30" flood-color="#183B35" flood-opacity=".28"/>
+    </filter>
+  </defs>
+</svg>
