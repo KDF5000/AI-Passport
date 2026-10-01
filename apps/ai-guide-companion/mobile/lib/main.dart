@@ -1653,9 +1653,18 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     fields = {
-      '方舟模型 / Endpoint': TextEditingController(text: widget.initial.arkModel),
+      'LLM API Endpoint': TextEditingController(
+        text: widget.initial.arkEndpoint,
+      ),
+      '模型 / Model': TextEditingController(text: widget.initial.arkModel),
       '方舟 API Key': TextEditingController(text: widget.initial.arkApiKey),
-      'Speech Appkey': TextEditingController(text: widget.initial.speechAppId),
+      'ASR API Endpoint': TextEditingController(
+        text: widget.initial.asrEndpoint,
+      ),
+      'TTS API Endpoint': TextEditingController(
+        text: widget.initial.ttsEndpoint,
+      ),
+      'Speech AppKey': TextEditingController(text: widget.initial.speechAppId),
       'Speech AK': TextEditingController(text: widget.initial.speechAccessKey),
       'Speech SK': TextEditingController(text: widget.initial.speechSecretKey),
     };
@@ -1670,6 +1679,137 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  Widget _sectionHeader(IconData icon, String title, String subtitle) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DecoratedBox(
+              decoration: const BoxDecoration(
+                color: GuideColors.mint,
+                shape: BoxShape.circle,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(9),
+                child: Icon(icon, color: GuideColors.green, size: 20),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: GuideColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: GuideColors.muted,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _field(
+    String key, {
+    String? hint,
+    String? helper,
+    TextInputType? keyboardType,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: fields[key],
+      obscureText: secretFields.contains(key),
+      autocorrect: false,
+      enableSuggestions: !secretFields.contains(key),
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: key,
+        hintText: hint,
+        helperText: helper,
+        helperMaxLines: 2,
+        border: const OutlineInputBorder(),
+      ),
+    ),
+  );
+
+  Widget _endpointField(
+    String key, {
+    required String defaultValue,
+    required String helper,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: fields[key],
+      autocorrect: false,
+      keyboardType: TextInputType.url,
+      decoration: InputDecoration(
+        labelText: key,
+        helperText: helper,
+        helperMaxLines: 2,
+        border: const OutlineInputBorder(),
+        suffixIcon: IconButton(
+          tooltip: '恢复默认地址',
+          icon: const Icon(Icons.restart_alt),
+          onPressed: () => setState(() => fields[key]!.text = defaultValue),
+        ),
+      ),
+    ),
+  );
+
+  bool _validEndpoint(String value, Set<String> schemes) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null && uri.host.isNotEmpty && schemes.contains(uri.scheme);
+  }
+
+  void _save() {
+    final arkEndpoint = fields['LLM API Endpoint']!.text.trim();
+    if (!_validEndpoint(arkEndpoint, const {'http', 'https'})) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入完整的 http(s) LLM API Endpoint')),
+      );
+      return;
+    }
+    final asrEndpoint = fields['ASR API Endpoint']!.text.trim();
+    final ttsEndpoint = fields['TTS API Endpoint']!.text.trim();
+    if (!_validEndpoint(asrEndpoint, const {'ws', 'wss'}) ||
+        !_validEndpoint(ttsEndpoint, const {'http', 'https', 'ws', 'wss'})) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ASR 需使用 ws(s)，TTS 需使用完整的 http(s) 或 ws(s) Endpoint'),
+        ),
+      );
+      return;
+    }
+    Navigator.pop(
+      context,
+      widget.initial.copyWith(
+        arkBaseUrl: arkEndpoint,
+        arkChatPath: '',
+        arkModel: fields['模型 / Model']!.text.trim(),
+        arkApiKey: fields['方舟 API Key']!.text.trim(),
+        speechAppId: fields['Speech AppKey']!.text.trim(),
+        speechAccessKey: fields['Speech AK']!.text.trim(),
+        speechSecretKey: fields['Speech SK']!.text.trim(),
+        asrEndpoint: asrEndpoint,
+        ttsEndpoint: ttsEndpoint,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('AI 服务设置')),
@@ -1677,35 +1817,43 @@ class _SettingsPageState extends State<SettingsPage> {
       padding: const EdgeInsets.all(20),
       children: [
         const Text(
-          'CN 区域的语音端点和默认音色已内置。密钥只保存在本机安全存储。',
+          'LLM 默认使用火山方舟，也可以填写兼容 Chat Completions 的 API Endpoint。密钥只保存在本机安全存储。',
           style: TextStyle(color: GuideColors.muted, height: 1.5),
         ),
-        const SizedBox(height: 18),
-        for (final entry in fields.entries) ...[
-          TextField(
-            controller: entry.value,
-            obscureText: secretFields.contains(entry.key),
-            autocorrect: false,
-            decoration: InputDecoration(
-              labelText: entry.key,
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        FilledButton(
-          onPressed: () => Navigator.pop(
-            context,
-            AiSettings(
-              arkModel: fields['方舟模型 / Endpoint']!.text.trim(),
-              arkApiKey: fields['方舟 API Key']!.text.trim(),
-              speechAppId: fields['Speech Appkey']!.text.trim(),
-              speechAccessKey: fields['Speech AK']!.text.trim(),
-              speechSecretKey: fields['Speech SK']!.text.trim(),
-            ),
-          ),
-          child: const Text('保存设置'),
+        const SizedBox(height: 24),
+        _sectionHeader(Icons.auto_awesome, 'LLM API', '用于生成行程和回答旅行问题。'),
+        _endpointField(
+          'LLM API Endpoint',
+          defaultValue: AiSettings.defaultArkEndpoint,
+          helper: '完整的 Chat Completions 地址，可替换为兼容的代理或自建服务。',
         ),
+        _field(
+          '模型 / Model',
+          hint: '例如 ep-xxxxxxxx',
+          helper: '火山方舟填写 ep- 开头的推理接入点 ID；自定义服务填写模型名。',
+        ),
+        _field('方舟 API Key', hint: 'Bearer API Key'),
+        const SizedBox(height: 14),
+        _sectionHeader(
+          Icons.graphic_eq,
+          '语音 API',
+          '默认使用 Speech/SAIL，只需填写应用凭据。',
+        ),
+        _endpointField(
+          'ASR API Endpoint',
+          defaultValue: AiSettings.defaultAsrEndpoint,
+          helper: '语音识别 WebSocket 地址；默认使用 Speech 大模型流式 ASR。',
+        ),
+        _endpointField(
+          'TTS API Endpoint',
+          defaultValue: AiSettings.defaultTtsEndpoint,
+          helper: '语音合成地址；默认使用 SAIL/SAMI，Token 地址将从这里自动推导。',
+        ),
+        _field('Speech AppKey', hint: '应用级 AppKey'),
+        _field('Speech AK', hint: 'Access Key'),
+        _field('Speech SK', hint: 'Secret Key'),
+        const SizedBox(height: 4),
+        FilledButton(onPressed: _save, child: const Text('保存设置')),
       ],
     ),
   );

@@ -57,27 +57,35 @@ environment and region as the endpoints being called.
 
 ### 1. Volcengine Ark: itinerary generation and questions
 
+Application portal: [Volcengine Ark Console](https://ark.bytedance.net)
+
 Apply for or prepare:
 
-1. A Volcengine account with Ark access in the **CN production region**.
-2. A chat-capable model deployment/inference endpoint that supports the
-   Chat Completions API, JSON-object responses, and streaming.
-3. An Ark API key authorized to call that endpoint.
-4. Sufficient output-token and request-time quotas. Itinerary generation can
-   return several thousand tokens.
+1. Sign in to the Ark console and select the **CN production region**.
+2. Enable a chat model and create an inference endpoint. Record its `ep-...`
+   endpoint ID.
+3. Create an API key authorized to call that endpoint.
+4. Confirm that the model supports Chat Completions, JSON-object responses,
+   streaming, and sufficient output-token and request-time quotas.
 
 In the phone app, open **Settings** and enter:
 
-- **Ark model / Endpoint**: the endpoint ID shown by Ark, commonly beginning
-  with `ep-`;
+- **LLM API Endpoint**: keep the default unless a proxy or compatible service
+  is required;
+- **Model**: the endpoint ID shown by Ark, commonly beginning with `ep-`;
 - **Ark API Key**: the corresponding API key.
 
-The app currently calls the CN Ark base URL
-`https://ark.cn-beijing.volces.com/api/v3` and `/chat/completions`. If a private
-proxy is used, the phone must already be able to reach it, for example through
-an active VPN. Never put a proxy credential in this repository.
+The app defaults to Ark's complete CN Chat Completions URL. If a private proxy
+or another compatible service is used, edit the complete **LLM API Endpoint**
+in Settings. The service must support OpenAI-compatible Chat Completions
+requests, JSON output, and streaming responses. The phone must already be able
+to reach it, for example through an active VPN. Never put a proxy credential in
+this repository.
 
 ### 2. ByteDance Speech/SAIL: speech recognition and synthesis
+
+Application portal:
+[Speech/SAIL Application Management](https://speech.bytedance.net/sail/cn/self/app)
 
 Ask the Speech/SAIL service owner to create or authorize one application in the
 **CN production environment** with all of the following:
@@ -91,12 +99,17 @@ Ask the Speech/SAIL service owner to create or authorize one application in the
   synthesis requests and retries one rate-limit response, but cannot bypass the
   service quota.
 
-Enter the resulting **Speech AppKey**, **Speech AK**, and **Speech SK** in the
-phone settings. The CN ASR endpoint
-`wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async` (the client-facing
-external endpoint), resource IDs, and default voice are already configured in
-the app. A bad ASR URL saved by an older build is migrated automatically at
-startup.
+To apply:
+
+1. Open the application portal and create or select a CN application.
+2. Request streaming large-model ASR and SAIL/SAMI TTS access, including an
+   available Chinese voice.
+3. After approval and quota activation, copy the application's AppKey, AK, and
+   SK.
+
+Keep the default ASR and TTS endpoints in Settings and enter **Speech AppKey**,
+**Speech AK**, and **Speech SK**. Change the endpoints only when a proxy or
+compatible service is required.
 
 `UserNotFound` / `40200141` normally means the AppKey or credentials belong to
 a different environment or region, such as BOE credentials being sent to the

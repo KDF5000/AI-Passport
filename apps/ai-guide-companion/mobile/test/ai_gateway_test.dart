@@ -54,6 +54,19 @@ void main() {
     );
   });
 
+  test('migrates the legacy TTS WebSocket default to SAIL HTTP', () {
+    expect(
+      AiSettings.normalizeTtsEndpoint(AiSettings.legacyTtsWebSocketEndpoint),
+      AiSettings.defaultTtsEndpoint,
+    );
+    expect(
+      AiSettings.normalizeTtsEndpoint(
+        'https://speech-proxy.example.test/custom/v2/invoke',
+      ),
+      'https://speech-proxy.example.test/custom/v2/invoke',
+    );
+  });
+
   const settings = AiSettings(
     arkBaseUrl: 'https://example.test/api/v3',
     arkChatPath: '/chat/completions',
@@ -96,8 +109,22 @@ void main() {
     expect(answer, 'Walk toward the main theater.');
   });
 
+  test('accepts a complete custom LLM endpoint without appending a path', () {
+    expect(
+      AiGateway.joinArkUri(
+        'https://proxy.example.test/v1/chat/completions?region=cn',
+        '',
+      ).toString(),
+      'https://proxy.example.test/v1/chat/completions?region=cn',
+    );
+  });
+
   test('requests strict JSON for structured trip generation', () async {
     final client = MockClient((request) async {
+      expect(
+        request.url.toString(),
+        'https://example.test/api/v3/chat/completions',
+      );
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       expect(body['response_format'], {'type': 'json_object'});
       expect(body['temperature'], 0.2);
@@ -125,6 +152,10 @@ void main() {
 
   test('streams Ark chat deltas', () async {
     final client = MockClient((request) async {
+      expect(
+        request.url.toString(),
+        'https://example.test/api/v3/chat/completions',
+      );
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       expect(body['stream'], isTrue);
       expect(body['max_tokens'], 400);
@@ -202,12 +233,13 @@ void main() {
     final client = MockClient((request) async {
       if (!tokenRequested) {
         tokenRequested = true;
-        expect(request.url.host, 'sami.bytedance.com');
-        expect(request.url.path, '/internal/api/v1/token');
+        expect(request.url.host, 'speech-proxy.example.test');
+        expect(request.url.path, '/gateway/sail/token');
         expect(request.url.queryParameters['appkey'], 'app-test');
         return http.Response(jsonEncode({'token': 'sail-token'}), 200);
       }
-      expect(request.url.path, '/internal/api/v1/invoke');
+      expect(request.url.host, 'speech-proxy.example.test');
+      expect(request.url.path, '/gateway/sail/invoke');
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       expect(body['namespace'], 'TTS');
       final payload =
@@ -223,11 +255,24 @@ void main() {
     });
 
     final audio = await AiGateway(
-      sailSettings,
+      sailSettings.copyWith(
+        ttsEndpoint: 'https://speech-proxy.example.test/gateway/sail/invoke',
+      ),
       client: client,
     ).synthesize('Hello');
 
     expect(audio, utf8.encode('RIFFWAV'));
+  });
+
+  test('derives the SAIL token endpoint from the configured invoke URL', () {
+    expect(
+      AiGateway.sailTokenEndpoint(
+        Uri.parse(
+          'https://proxy.example.test:8443/custom/sail/invoke?ignored=1',
+        ),
+      ).toString(),
+      'https://proxy.example.test:8443/custom/sail/token',
+    );
   });
 
   test('retries a rate-limited SAIL TTS request once', () async {

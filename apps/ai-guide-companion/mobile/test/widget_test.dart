@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:guide_companion/ai/ai_settings.dart';
 import 'package:guide_companion/guide_controller.dart';
 import 'package:guide_companion/main.dart';
 import 'package:guide_companion/trip/trip_plan.dart';
@@ -59,6 +60,55 @@ void main() {
     expect(find.text('选择到达时间'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('supports custom LLM and speech endpoints', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: SettingsPage(initial: AiSettings())),
+    );
+
+    expect(find.text('LLM API'), findsOneWidget);
+    expect(find.text('语音 API'), findsOneWidget);
+    expect(find.text('模型 / Model'), findsOneWidget);
+    expect(find.text('模型 / Endpoint ID'), findsNothing);
+    expect(find.text('LLM API Endpoint'), findsOneWidget);
+    final llmEndpoint = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'LLM API Endpoint'),
+    );
+    expect(llmEndpoint.controller?.text, AiSettings.defaultArkEndpoint);
+    final llmEndpointTop = tester.getTopLeft(
+      find.widgetWithText(TextField, 'LLM API Endpoint'),
+    );
+    final modelTop = tester.getTopLeft(
+      find.widgetWithText(TextField, '模型 / Model'),
+    );
+    expect(llmEndpointTop.dy, lessThan(modelTop.dy));
+
+    await tester.scrollUntilVisible(
+      find.text('Speech SK'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Speech SK'), findsOneWidget);
+    expect(find.text('Speech AppKey'), findsOneWidget);
+    expect(find.text('Speech AK'), findsOneWidget);
+    expect(find.text('ASR API Endpoint'), findsOneWidget);
+    expect(find.text('TTS API Endpoint'), findsOneWidget);
+    final asrEndpoint = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'ASR API Endpoint'),
+    );
+    final ttsEndpoint = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'TTS API Endpoint'),
+    );
+    expect(asrEndpoint.controller?.text, AiSettings.defaultAsrEndpoint);
+    expect(ttsEndpoint.controller?.text, AiSettings.defaultTtsEndpoint);
+    final asrTop = tester.getTopLeft(
+      find.widgetWithText(TextField, 'ASR API Endpoint'),
+    );
+    final appKeyTop = tester.getTopLeft(
+      find.widgetWithText(TextField, 'Speech AppKey'),
+    );
+    expect(asrTop.dy, lessThan(appKeyTop.dy));
   });
 
   testWidgets('shows a high-contrast Bluetooth icon while disconnected', (

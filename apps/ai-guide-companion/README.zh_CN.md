@@ -45,25 +45,31 @@ AI Passport 固件组成。手机负责规划并保存行程、在用户明确�
 
 ### 1. 火山方舟：生成路线与 AI 问答
 
+申请入口：[火山方舟控制台](https://ark.bytedance.net)
+
 需要申请或准备：
 
-1. 已开通火山方舟的账号，使用 **CN 生产区**。
-2. 创建一个支持 Chat Completions、JSON 对象输出和流式输出的对话模型推理
-   Endpoint。
-3. 创建有权调用该 Endpoint 的方舟 API Key。
-4. 确认输出 Token 和请求时长配额充足；一次完整行程可能返回数千 Token。
+1. 登录火山方舟控制台，确认使用 **CN 生产区**。
+2. 开通需要使用的对话模型，并创建推理接入点；记录以 `ep-` 开头的 Endpoint
+   ID。
+3. 在 API Key 管理中创建有权调用该接入点的 API Key。
+4. 确认模型支持 Chat Completions、JSON 对象输出和流式输出，并确保输出 Token
+   与请求时长配额足够生成完整行程。
 
 在手机应用的“设置”中填写：
 
-- **方舟模型 / Endpoint**：方舟控制台显示的推理接入点 ID，通常以 `ep-` 开头；
+- **LLM API Endpoint**：默认值可直接使用；只有通过代理或兼容服务访问时才需修改；
+- **模型 / Model**：方舟控制台显示的推理接入点 ID，通常以 `ep-` 开头；
 - **方舟 API Key**：有权调用该 Endpoint 的 API Key。
 
-应用默认调用 CN 方舟地址
-`https://ark.cn-beijing.volces.com/api/v3` 和 `/chat/completions`。如果改用
-内网代理，必须先保证手机自身可访问，例如已经开启可用的 VPN；不要把代理凭据
-写入仓库。
+应用默认调用 CN 方舟的完整 Chat Completions 地址。如果改用内网代理或其他
+兼容服务，可在设置页修改完整的 **LLM API Endpoint**。自定义服务需要兼容
+OpenAI Chat Completions 请求、JSON 输出与流式响应。必须先保证手机自身可访问，
+例如已经开启可用的 VPN；不要把代理凭据写入仓库。
 
 ### 2. 字节 Speech/SAIL：语音识别与语音合成
+
+申请入口：[Speech/SAIL 应用管理](https://speech.bytedance.net/sail/cn/self/app)
 
 向 Speech/SAIL 服务负责人申请在 **CN 生产环境**创建或授权一个应用，并同时
 获得：
@@ -76,11 +82,15 @@ AI Passport 固件组成。手机负责规划并保存行程、在用户明确�
 - 满足对话式语音合成的请求频率配额。应用会串行发送 TTS，并在遇到一次限流时
   重试，但无法绕过服务端配额。
 
-申请完成后，在手机设置中填写 **Speech AppKey**、**Speech AK** 和
-**Speech SK**。CN 接口地址
-`wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async`（客户端外网
-地址）、资源 ID 和默认音色已经内置，无需普通用户填写。旧版本保存的错误 ASR
-地址会在启动时自动迁移。
+申请方式：
+
+1. 打开应用管理入口，新建应用或选择已有的 CN 应用。
+2. 为应用申请流式大模型 ASR 和 SAIL/SAMI TTS 权限，并选择可用的中文音色。
+3. 确认权限审批与配额生效后，复制该应用的 AppKey、AK 和 SK。
+
+申请完成后，手机设置中的 ASR/TTS Endpoint 默认值可直接使用，只需填写
+**Speech AppKey**、**Speech AK** 和 **Speech SK**。需要通过代理或兼容服务
+访问时，再分别修改 ASR 与 TTS API Endpoint。
 
 如果返回 `UserNotFound` / `40200141`，通常是 AppKey 或 AK/SK 属于另一个
 环境或地区，例如把 BOE 凭据用于 CN 生产接口。应核对申请地区和应用绑定关系，

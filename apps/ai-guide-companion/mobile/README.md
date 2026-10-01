@@ -40,10 +40,27 @@ Open **Settings** and provide:
 - Ark model/endpoint ID and Ark API key for route generation and questions;
 - Speech AppKey, AK, and SK for streaming ASR and SAIL/SAMI TTS.
 
-The CN endpoints and default Speech resource identifiers are built in. Obtain
-all credentials from the corresponding service owner and keep the application,
-credentials, and endpoint region aligned. Secrets are stored with
-`flutter_secure_storage`; non-secret preferences use shared preferences.
+Application portals:
+
+- [Volcengine Ark Console](https://ark.bytedance.net): enable a chat model,
+  create an inference endpoint, and obtain its `ep-...` ID and API key;
+- [Speech/SAIL Application Management](https://speech.bytedance.net/sail/cn/self/app):
+  create or select a CN application, request streaming ASR and SAIL/SAMI TTS
+  access, and obtain its AppKey, AK, and SK.
+
+Settings are grouped into **LLM API** and **Speech API** sections. The LLM
+section pre-fills the complete Volcengine Ark CN Chat Completions URL and allows
+it to be replaced with a compatible custom address. Speech pre-fills the
+standard Speech streaming-ASR WebSocket endpoint and SAIL/SAMI TTS HTTP
+endpoint, and allows either endpoint to be replaced with a compatible custom
+service. The SAIL token URL is derived from the configured TTS endpoint by
+replacing its final path segment with `token`.
+
+A custom LLM service must support OpenAI-compatible Chat Completions requests
+and streaming responses. Obtain all credentials from the corresponding service
+owner and keep the application, credentials, and endpoint region aligned.
+Secrets are stored with `flutter_secure_storage`; non-secret preferences use
+shared preferences.
 
 The app expects synthesized audio that can be decoded as 16 kHz, 16-bit, mono
 PCM/WAV before it is converted to the Passport streaming format.

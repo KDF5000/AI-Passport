@@ -304,9 +304,13 @@ final class AiGateway {
   }
 
   Future<Uint8List> synthesize(String text) async {
-    if (settings.speechAccessKey.isNotEmpty &&
-        settings.speechSecretKey.isNotEmpty &&
-        settings.speechAppId.isNotEmpty) {
+    final endpoint = Uri.parse(settings.ttsEndpoint);
+    if (endpoint.scheme == 'http' || endpoint.scheme == 'https') {
+      if (settings.speechAccessKey.isEmpty ||
+          settings.speechSecretKey.isEmpty ||
+          settings.speechAppId.isEmpty) {
+        throw StateError('SAIL TTS requires AppKey, AK, and SK');
+      }
       return _synthesizeOverSailHttp(text);
     }
 
@@ -326,7 +330,7 @@ final class AiGateway {
       },
       'request': {'reqid': _requestId(), 'text': text, 'operation': 'query'},
     });
-    final channel = await websocket(Uri.parse(settings.ttsEndpoint), const {});
+    final channel = await websocket(endpoint, const {});
     final output = BytesBuilder(copy: false);
     try {
       channel.sink.add(request);
@@ -372,7 +376,7 @@ final class AiGateway {
     for (var attempt = 0; attempt < 2; attempt += 1) {
       response = await client
           .post(
-            Uri.parse('https://sami.bytedance.com/internal/api/v1/invoke'),
+            Uri.parse(settings.ttsEndpoint),
             headers: {'content-type': 'application/json'},
             body: requestBody,
           )
@@ -423,17 +427,16 @@ final class AiGateway {
       timestamp: timestamp,
       expiration: expiration,
     );
-    final uri = Uri.parse('https://sami.bytedance.com/internal/api/v1/token')
-        .replace(
-          queryParameters: {
-            'version': 'auth-v1',
-            'access_key': settings.speechAccessKey,
-            'appkey': settings.speechAppId,
-            'timestamp': '$timestamp',
-            'expiration': '$expiration',
-            'signature': signature,
-          },
-        );
+    final uri = sailTokenEndpoint(Uri.parse(settings.ttsEndpoint)).replace(
+      queryParameters: {
+        'version': 'auth-v1',
+        'access_key': settings.speechAccessKey,
+        'appkey': settings.speechAppId,
+        'timestamp': '$timestamp',
+        'expiration': '$expiration',
+        'signature': signature,
+      },
+    );
     final response = await client.get(uri).timeout(_timeout);
     _check(response.statusCode, response.bodyBytes);
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
@@ -446,6 +449,22 @@ final class AiGateway {
   }
 
   void close() => client.close();
+
+  static Uri sailTokenEndpoint(Uri invokeEndpoint) {
+    final segments = invokeEndpoint.pathSegments.toList();
+    if (segments.isEmpty) {
+      segments.add('token');
+    } else {
+      segments[segments.length - 1] = 'token';
+    }
+    return Uri(
+      scheme: invokeEndpoint.scheme,
+      userInfo: invokeEndpoint.userInfo,
+      host: invokeEndpoint.host,
+      port: invokeEndpoint.hasPort ? invokeEndpoint.port : null,
+      path: '/${segments.map(Uri.encodeComponent).join('/')}',
+    );
+  }
 
   Uint8List _jsonFrame(Map<String, Object?> value) => VolcSpeechProtocol.frame(
     VolcSpeechFrame(
@@ -524,6 +543,7 @@ final class AiGateway {
 
   static Uri joinArkUri(String baseUrl, String chatPath) {
     final base = Uri.parse(baseUrl);
+    if (chatPath.trim().isEmpty) return base;
     final normalizedPath = chatPath.startsWith('/') ? chatPath : '/$chatPath';
     final basePath = base.path.endsWith('/')
         ? base.path.substring(0, base.path.length - 1)

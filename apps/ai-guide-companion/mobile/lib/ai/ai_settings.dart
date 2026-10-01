@@ -3,15 +3,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 final class AiSettings {
   static const defaultArkModel = '';
+  static const defaultArkBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
+  static const defaultArkChatPath = '/chat/completions';
+  static const defaultArkEndpoint = '$defaultArkBaseUrl$defaultArkChatPath';
   static const defaultSailVoice = 'zh_female_qingxin';
   static const defaultAsrEndpoint =
       'wss://speech.bytedance.com/api/v3/sauc/v2/bigmodel_async';
+  static const defaultTtsEndpoint =
+      'https://sami.bytedance.com/internal/api/v1/invoke';
+  static const legacyTtsWebSocketEndpoint =
+      'wss://openspeech.bytedance.com/api/v1/tts/ws_binary';
   static const internalAsrHost = 'speech.byted.org';
   static const externalAsrHost = 'speech.bytedance.com';
 
   const AiSettings({
-    this.arkBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3',
-    this.arkChatPath = '/chat/completions',
+    this.arkBaseUrl = defaultArkBaseUrl,
+    this.arkChatPath = defaultArkChatPath,
     this.arkModel = defaultArkModel,
     this.arkApiKey = '',
     this.speechAppId = '',
@@ -21,7 +28,7 @@ final class AiSettings {
     this.asrEndpoint = defaultAsrEndpoint,
     this.asrResourceId = 'asr.streaming.model.big',
     this.asrCluster = '',
-    this.ttsEndpoint = 'wss://openspeech.bytedance.com/api/v1/tts/ws_binary',
+    this.ttsEndpoint = defaultTtsEndpoint,
     this.ttsCluster = 'volcano_tts',
     this.ttsVoice = defaultSailVoice,
   });
@@ -40,6 +47,16 @@ final class AiSettings {
   final String ttsEndpoint;
   final String ttsCluster;
   final String ttsVoice;
+
+  String get arkEndpoint {
+    if (arkChatPath.trim().isEmpty) return arkBaseUrl;
+    final base = Uri.parse(arkBaseUrl);
+    final path = arkChatPath.startsWith('/') ? arkChatPath : '/$arkChatPath';
+    final basePath = base.path.endsWith('/')
+        ? base.path.substring(0, base.path.length - 1)
+        : base.path;
+    return base.replace(path: '$basePath$path').toString();
+  }
 
   static String normalizeAsrEndpoint(String? value) {
     final raw = value?.trim();
@@ -65,6 +82,16 @@ final class AiSettings {
       path: endpoint.path,
       query: endpoint.hasQuery ? endpoint.query : null,
     ).toString();
+  }
+
+  static String normalizeTtsEndpoint(String? value) {
+    final endpoint = value?.trim();
+    if (endpoint == null ||
+        endpoint.isEmpty ||
+        endpoint == legacyTtsWebSocketEndpoint) {
+      return defaultTtsEndpoint;
+    }
+    return endpoint;
   }
 
   AiSettings copyWith({
@@ -112,10 +139,9 @@ final class AiSettingsStore {
       _secret.read(key: 'speechToken'),
     ]);
     return AiSettings(
-      arkBaseUrl:
-          prefs.getString('arkBaseUrl') ??
-          'https://ark.cn-beijing.volces.com/api/v3',
-      arkChatPath: prefs.getString('arkChatPath') ?? '/chat/completions',
+      arkBaseUrl: prefs.getString('arkBaseUrl') ?? AiSettings.defaultArkBaseUrl,
+      arkChatPath:
+          prefs.getString('arkChatPath') ?? AiSettings.defaultArkChatPath,
       arkModel: prefs.getString('arkModel') ?? AiSettings.defaultArkModel,
       arkApiKey: secrets[0] ?? '',
       speechAppId: prefs.getString('speechAppId') ?? '',
@@ -128,9 +154,9 @@ final class AiSettingsStore {
       asrResourceId:
           prefs.getString('asrResourceId') ?? 'asr.streaming.model.big',
       asrCluster: prefs.getString('asrCluster') ?? '',
-      ttsEndpoint:
-          prefs.getString('ttsEndpoint') ??
-          'wss://openspeech.bytedance.com/api/v1/tts/ws_binary',
+      ttsEndpoint: AiSettings.normalizeTtsEndpoint(
+        prefs.getString('ttsEndpoint'),
+      ),
       ttsCluster: prefs.getString('ttsCluster') ?? 'volcano_tts',
       ttsVoice: prefs.getString('ttsVoice') == 'BV700_V2_streaming'
           ? AiSettings.defaultSailVoice
@@ -151,7 +177,10 @@ final class AiSettingsStore {
       ),
       prefs.setString('asrResourceId', value.asrResourceId),
       prefs.setString('asrCluster', value.asrCluster),
-      prefs.setString('ttsEndpoint', value.ttsEndpoint),
+      prefs.setString(
+        'ttsEndpoint',
+        AiSettings.normalizeTtsEndpoint(value.ttsEndpoint),
+      ),
       prefs.setString('ttsCluster', value.ttsCluster),
       prefs.setString('ttsVoice', value.ttsVoice),
       _secret.write(key: 'arkApiKey', value: value.arkApiKey),
